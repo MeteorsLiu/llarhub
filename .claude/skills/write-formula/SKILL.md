@@ -235,6 +235,8 @@ func (foo).mul = (
 // a.mul(100) → mulInt, a.mul(b) → mulFoo
 ```
 
+**Go naming convention**: Overloaded functions/methods are compiled to Go with `__N` suffix distinguishing each variant: `outputDir()` → `OutputDir__0()`, `outputDir(dep)` → `OutputDir__1(dep)`.
+
 ### Overloaded operators
 
 Define `+`, `-`, `*`, etc. on custom types:
@@ -466,8 +468,8 @@ func (this *zlib) MainEntry() {
 Key points:
 - The filename prefix (before `_`) becomes the struct name
 - Top-level calls like `id "x"` become `this.Id("x")` — methods on the embedded struct
-- `ModuleF` embeds `gsh.App`, so shell commands (`exec`, `capout`, `output`) are available
-- Overloaded methods use `__N` suffix in Go: `outputDir()` → `OutputDir__0()`, `outputDir(dep)` → `OutputDir__1(dep)`
+- `ModuleF` embeds [`gsh.App`](https://github.com/qiniu/x/blob/main/gsh/classfile.go), the project class ([classfile](https://github.com/goplus/xgo/blob/main/doc/classfile.md)) behind `.gsh` files — enables shell command execution in XGo via `exec`, `capout`, `output`, `lastErr`, `exitCode`, and direct command syntax (e.g. `mkdir "testgsh"` calls `XGo_Exec("mkdir", "testgsh")`)
+- Overloaded methods in Go use `__N` suffix (see Overloaded methods above): `outputDir()` → `OutputDir__0()`, `outputDir(dep)` → `OutputDir__1(dep)`
 
 ---
 
@@ -475,7 +477,7 @@ Key points:
 
 ### `_llar.gox` — Build Formula
 
-Struct: `formula.ModuleF` (embeds `gsh.App` for shell execution)
+Struct: [`formula.ModuleF`](https://github.com/goplus/llar/blob/main/formula/classfile.go) (embeds [`gsh.App`](https://github.com/qiniu/x/blob/main/gsh/classfile.go) for shell execution)
 
 Auto-imported packages: `cmake` (`github.com/goplus/llar/x/cmake`), `autotools` (`github.com/goplus/llar/x/autotools`)
 
@@ -600,11 +602,13 @@ Both `.use()` set: `CMAKE_PREFIX_PATH`, `PKG_CONFIG_PATH`, `CPPFLAGS -I.../inclu
 ## File Layout
 
 ```
-formulas/{owner}/{repo}/
+{owner}/{repo}/
   versions.json                  # module metadata + static deps fallback
   {name}_cmp.gox                 # optional: custom version comparator
   {from_version}/{name}_llar.gox # the build formula
 ```
+
+`{name}` is the library name (e.g. `zlib`, `freetype`, `libpng`).
 
 ### versions.json
 
