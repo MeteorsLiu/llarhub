@@ -1,0 +1,55 @@
+id "pnggroup/libpng"
+
+fromVer "v1.6.58"
+
+onRequire (proj, deps) => {
+	deps.require "madler/zlib", "v1.3.1"
+}
+
+onBuild (ctx, proj, out) => {
+	installDir, err := ctx.outputDir()
+	if err != nil {
+		out.addErr err
+		return
+	}
+
+	// Use configure so the dependency include directory stays a normal -I flag.
+	// For example, CMake emits it as -isystem on macOS, where a host zlib.h can
+	// override the zlib header used to generate pnglibconf.h.
+	a := autotools.new(ctx.SourceDir, ctx.SourceDir+"/_build", installDir)
+
+	for _, dep := range proj.Deps {
+		depDir, err := ctx.outputDir(dep)
+		if err != nil {
+			out.addErr err
+			return
+		}
+		a.use depDir
+	}
+
+	err = a.configure("--disable-shared", "--enable-static", "--disable-tests", "--disable-tools")
+	if err != nil {
+		out.addErr err
+		return
+	}
+	err = a.build()
+	if err != nil {
+		out.addErr err
+		return
+	}
+	err = a.install()
+	if err != nil {
+		out.addErr err
+		return
+	}
+
+	a.use installDir
+	capout => {
+		exec "pkg-config", "--static", "--libs", "libpng16"
+	}
+	if lastErr != nil {
+		out.addErr lastErr
+		return
+	}
+	out.setMetadata output
+}
