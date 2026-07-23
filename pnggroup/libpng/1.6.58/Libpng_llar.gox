@@ -82,12 +82,12 @@ onTest (ctx, proj, out) => {
 
 	testSource := ctx.SourceDir + "/_llar_libpng_test.c"
 	testBinary := ctx.SourceDir + "/_llar_libpng_test"
-	err = os.writeFile(testSource, []byte(`#include <png.h>
-
-int main(void) {
-	return png_access_version_number() == 0 ? 1 : 0;
-}
-`), 0o644)
+	testProgram, err := proj.readFile("1.6.58/libpng_test.c")
+	if err != nil {
+		out.addErr err
+		return
+	}
+	err = os.writeFile(testSource, testProgram, 0o644)
 	if err != nil {
 		out.addErr err
 		return
@@ -103,12 +103,14 @@ int main(void) {
 
 	args := []string{testSource, "-o", testBinary}
 	args = append(args, strings.fields(output)...)
+	echo "Compiling libpng16 consumer"
 	err = exec("cc", args...)
 	if err != nil {
 		out.addErr err
 		return
 	}
 
+	echo "Running libpng16 consumer"
 	err = exec(testBinary)
 	if err != nil {
 		out.addErr err
