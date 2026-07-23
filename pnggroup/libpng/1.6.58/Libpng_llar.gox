@@ -1,3 +1,8 @@
+import (
+	"os"
+	"strings"
+)
+
 id "pnggroup/libpng"
 
 fromVer "v1.6.58"
@@ -52,4 +57,60 @@ onBuild (ctx, proj, out) => {
 		return
 	}
 	out.setMetadata output
+}
+
+onTest (ctx, proj, out) => {
+	installDir, err := ctx.outputDir()
+	if err != nil {
+		out.addErr err
+		return
+	}
+
+	// Validate the installed package as an external C consumer.
+	// Recreate the dependency environment because onTest may run after a cache hit.
+	// For example, an install with png.h but no linkable libpng16.a must fail here.
+	a := autotools.new("", "", "")
+	for _, dep := range proj.Deps {
+		depDir, err := ctx.outputDir(dep)
+		if err != nil {
+			out.addErr err
+			return
+		}
+		a.use depDir
+	}
+	a.use installDir
+
+	testSource := ctx.SourceDir + "/_llar_libpng_test.c"
+	testBinary := ctx.SourceDir + "/_llar_libpng_test"
+	err = os.writeFile(testSource, []byte(`#include <png.h>
+
+int main(void) {
+	return png_access_version_number() == 0 ? 1 : 0;
+}
+`), 0o644)
+	if err != nil {
+		out.addErr err
+		return
+	}
+
+	capout => {
+		exec "pkg-config", "--static", "--cflags", "--libs", "libpng16"
+	}
+	if lastErr != nil {
+		out.addErr lastErr
+		return
+	}
+
+	args := []string{testSource, "-o", testBinary}
+	args = append(args, strings.fields(output)...)
+	err = exec("cc", args...)
+	if err != nil {
+		out.addErr err
+		return
+	}
+
+	err = exec(testBinary)
+	if err != nil {
+		out.addErr err
+	}
 }
