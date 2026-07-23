@@ -82,11 +82,21 @@ onTest (ctx, proj, out) => {
 
 	testSource := ctx.SourceDir + "/_llar_libpng_test.c"
 	testBinary := ctx.SourceDir + "/_llar_libpng_test"
-	testProgram, err := proj.readFile("1.6.58/libpng_test.c")
-	if err != nil {
-		out.addErr err
-		return
+	// TODO: Move this source to a formula sidecar after source and formula files
+	// have separate APIs. For example, onBuild currently reads formula files
+	// while onRequire reads upstream source files through Project.ReadFile.
+	testProgram := []byte(`#include <stdio.h>
+
+#include <png.h>
+
+int main(void) {
+	if (png_access_version_number() == 0) {
+		return 1;
 	}
+	puts("libpng consumer passed");
+	return 0;
+}
+`)
 	err = os.writeFile(testSource, testProgram, 0o644)
 	if err != nil {
 		out.addErr err
