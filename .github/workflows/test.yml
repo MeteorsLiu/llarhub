@@ -99,8 +99,8 @@ jobs:
       - name: Check out llar
         uses: actions/checkout@v7
         with:
-          repository: goplus/llar
-          ref: main
+          repository: MeteorsLiu/llar
+          ref: fix/ixgo-cmp-package
           path: .llar-source
 
       - name: Set up Go
