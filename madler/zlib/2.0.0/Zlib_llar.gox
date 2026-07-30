@@ -1,7 +1,6 @@
 id "madler/zlib"
 
-// Keep this directory in the synthetic CI diff.
-fromVer "1.0.0"
+fromVer "2.0.0"
 
 onBuild ctx => {
 	installDir := ctx.outputDir
