@@ -2,7 +2,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 )
 
 const consumerSource = `#include <cstdlib>
@@ -53,41 +52,32 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	version := ""
-	for line in string(os.readFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"))!).split("\n") {
-		trimmed := line.trimSpace
-		if trimmed.hasPrefix("set(PROJECT_VERSION \"") {
-			version = trimmed.trimPrefix("set(PROJECT_VERSION \"").trimSuffix("\")")
-			break
-		}
-	}
-	if version == "" {
-		panic "datetime CMakeLists.txt has no PROJECT_VERSION"
-	}
-
-	libs := "-L$${libdir} -ldatetime"
+	libs := ["-L$${libdir}", "-ldatetime"]
 	if slices.contains(target.require["os"], "linux") {
-		libs += " -lm -lpthread -ldl"
+		libs <- "-lm"
+		libs <- "-lpthread"
+		libs <- "-ldl"
 	}
-	cflags := "-I$${includedir}"
+	cflags := ["-I$${includedir}"]
 	if !shared {
-		cflags += " -DDATETIME_STATIC"
+		cflags <- "-DDATETIME_STATIC"
 	}
 
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib/datetime
-includedir=$${prefix}/include
 
-Name: datetime
-Description: A simple Date and time library built in C++
-Version: ` + version + `
-Libs: ` + libs + `
-Cflags: ` + cflags + `
-`
-	os.writeFile(filepath.join(pcDir, "datetime.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		variables = {"libdir": "$${prefix}/lib/datetime"},
+		name = "datetime",
+		description = "A simple Date and time library built in C++",
+		version = "v1.0.2",
+		libs = libs,
+		cflags = cflags,
+	)!
+
+	out := os.create(filepath.join(pcDir, "datetime.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("datetime")!
