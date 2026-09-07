@@ -102,8 +102,19 @@ LLAR's configured streams, working directory, and execution path.
   real consumer.
 - For C/C++ library metadata exposed through pkg-config, install a verified,
   relocatable `.pc` file and set metadata from the complete pkg-config
-  cflags-and-libs lookup. Do not substitute a handwritten `-I`, `-L`, or `-l`
+  cflags-and-libs lookup. Prefer a valid upstream-installed file. When the
+  Formula must create the file and the resolved LLAR revision provides
+  `pkgconfig.new`, use that writer; do not hand-assemble `prefix`,
+  `exec_prefix`, `libdir`, `includedir`, or the property layout. The Formula
+  still chooses the output path, filename, writer lifetime, and the final
+  `pkgconfig.lookup`. Do not substitute a handwritten `-I`, `-L`, or `-l`
   fragment, or a libs-only query, for the complete result.
+- A Formula is one reusable build script for every version in its `fromVer`
+  range. Do not read, compare, or branch on the exact requested version or
+  VCS ref. `fromVer` selects the script; the requested version selects the
+  source checkout. If the procedure cannot cover the range without that
+  string, add another Formula threshold. Do not use `target.version` even
+  when an older LLAR revision exposed it.
 - Keep consumer tests independent of the build scratch tree so they can run on
   a cache hit.
 - In `onBuild`, compile and install C/C++ packages only through the LLAR

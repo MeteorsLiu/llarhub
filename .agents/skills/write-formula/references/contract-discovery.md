@@ -36,7 +36,10 @@ Read the complete declarations found by these searches. Establish:
 - the `_llar.gox` project base class and automatic imports;
 - the generated entry contract;
 - each top-level Formula method and callback signature;
-- promoted fields and methods available inside callbacks;
+- promoted fields and methods available inside callbacks, including
+  `target.require` and `target.options`;
+- that Formula code must not read the exact requested version. Do not use
+  `target.version` even when an older LLAR revision exposed it;
 - the ownership and error behavior of source, build, and test context values.
 
 Also locate the Formula and comparator selection code. Confirm suffix matching,
@@ -79,6 +82,7 @@ Locate the active helper implementations and their tests:
 ```sh
 rg -n 'type CMake|func \([^)]*\*CMake\)|func New' . -g '*.go'
 rg -n 'type AutoTools|func \([^)]*\*AutoTools\)|func New' . -g '*.go'
+rg -n 'package pkgconfig|func New|func Use|func Lookup|func \(.*\) WriteTo' x/pkgconfig -g '*.go'
 rg -n 'OnBuild|OnTest|OnRequire|fOnBuild|fOnTest|fOnRequire' . -g '*.go'
 ```
 

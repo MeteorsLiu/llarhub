@@ -195,21 +195,23 @@ operations as builtins; use `fprintf!`, `fprintln!`, `sprintf`, `errorf`, and
 related forms without importing or qualifying `fmt`.
 
 Imports remain explicit unless the resolved LLAR `gox.mod` registers an
-auto-import. In the pinned Formula contract, `cmake` and `autotools` are
-registered helpers; ordinary packages such as `os`, `strings`, `slices`, and
-`encoding/json` still require an import. Resolve this list against the active
-LLAR revision instead of assuming a helper is globally available.
+auto-import. In the pinned Formula contract, `cmake`, `autotools`, and
+`pkgconfig` are registered helpers; ordinary packages such as `os`,
+`strings`, `slices`, and `encoding/json` still require an import. Resolve this
+list against the active LLAR revision instead of assuming a helper is globally
+available.
 
 Do not import `"runtime"` to read `GOOS` or `GOARCH` from a Formula. Those
 are host-process values. Use `target.require["os"]` and `target.require["arch"]`.
-When the resolved LLAR revision exposes `target.version`, that is the selected
-version or ref for this build.
+Do not read the exact requested version from Formula code. Do not use
+`target.version` even when an older LLAR revision exposed it.
 
 Use lowercase XGo aliases and auto-properties only for verified exported Go
 functions and zero-argument getters, such as `filepath.join`, `ctx.outputDir`,
 and `entry.isDir`. Keep parentheses for nested calls and calls whose result is
-consumed; omit them for side-effect-only command statements. LLAR build
-helpers whose methods return no error, such as
-`c.configure`, `c.build`, `c.install`, and `pkgconfig.use`, are called directly;
-use `!` for separate gsh or Go operations that return an error, such as
-`pkgconfig.lookup`.
+consumed; omit them for side-effect-only command statements. LLAR helpers
+whose methods return no error, such as `c.configure`, `c.build`, `c.install`,
+`pkgconfig.use`, `pc.libs.private`, and `pc.cflags.shared`, are called
+directly. Use `!` for operations that return an error, such as
+`pkgconfig.new`, `pkgconfig.lookup`, `pc.writeTo`, `os.mkdirAll`, and
+`os.create`.

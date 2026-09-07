@@ -18,6 +18,16 @@ compatible version is not missed. Add a new threshold when a source-backed
 incompatibility begins; do not split ranges merely because a dependency version
 changed if the active Formula can discover it from the selected tag.
 
+A Formula is a reusable build script for its selected range, not an
+exact-version recipe. LLAR uses the requested version to check out source and
+to pick `max(fromVer <= requested version)`. After that selection, Formula
+code must not read, compare, or branch on the requested version string or VCS
+ref. Do not use `target.version` even when an older LLAR revision exposed it.
+If one Formula cannot build every version in its range without that string,
+its `fromVer` range is wrong: add another threshold. A one-release exception
+needs both the exceptional `fromVer` and the restored later `fromVer`; it
+does not justify an exact-version conditional.
+
 Add a comparator only when the store's active default comparator misorders the
 real tag set. Before writing one, check every upstream version LLAR may select,
 not only the requested version or Formula thresholds. Every tag must conform to
@@ -51,9 +61,11 @@ Declare direct dependencies only. Map each upstream dependency name to an LLAR
 module id using verified repository evidence.
 
 When dependency versions vary inside a Formula range and upstream records them
-in a stable machine-readable source file, discover them from the requested tag
-through the active Formula dependency hook. Parse structured formats with a
-structured parser.
+in a stable machine-readable source file, discover them from the requested
+source tree through the active Formula dependency hook. Parse structured
+formats with a structured parser. The extraction algorithm stays the same
+across the range; only the data in each checkout may change. Do not use the
+requested version string to choose among discovery procedures.
 
 Resolve source ownership separately for every hook. Do not assume a project
 filesystem exposed during dependency discovery refers to the same source as a
@@ -95,14 +107,9 @@ Read the selected target from Formula `target`, not from the host process:
   choice as `target.options["name"][0]`. Do not treat
   `slices.contains(target.options["name"], "ON")` as the selected value when
   the slice can hold both a default and an override.
-- When the resolved LLAR revision exposes `target.version`, it is the original
-  version or ref selected for this build. Use it when the Formula must name
-  that tag: a `.pc` `Version` field, a version-specific source path, or a
-  dependency that tracks the same tag. It is not `fromVer`; `fromVer` is the
-  Formula range floor.
 
-`filter` may inspect `target.require`, `target.options`, and `target.version`
-to reject unsupported selections.
+`filter` may inspect `target.require` and `target.options` to reject
+unsupported matrix selections. It must not inspect the requested version.
 
 ## Build And Install
 
@@ -164,6 +171,55 @@ private dependencies, and flags from the selected upstream source and the
 actual installed interface; do not invent missing fields. Make the file
 relocatable, for example by deriving its prefix from `${pcfiledir}` instead of
 embedding the build or installation path.
+
+Prefer a valid `.pc` file installed by the upstream build. When a Formula must
+create the file itself and the resolved LLAR revision provides
+`pkgconfig.new`, use that writer. It supplies relocatable defaults for
+`prefix`, `exec_prefix`, `libdir`, and `includedir`. The Formula provides
+`name`, `description`, `version`, optional `url` / `requires` / `libs` /
+`cflags`, and optional private or shared fragments, then writes the file and
+runs the lookup:
+
+```xgo
+pcDir := filepath.join(installDir, "lib", "pkgconfig")
+os.mkdirAll(pcDir, 0o755)!
+
+pc := pkgconfig.new(
+    name = "foo",
+    description = "Foo library",
+    version = "1.2.0",
+    requires = ["zlib >= 1.2.0"],
+    libs = ["-L$${libdir}", "-lfoo"],
+    cflags = ["-I$${includedir}"],
+)!
+pc.libs.private ["-lm"]
+pc.cflags.private ["-DFOO_STATIC"]
+
+out := os.create(filepath.join(pcDir, "foo.pc"))!
+pc.writeTo(out)!
+out.close()!
+
+pkgconfig.use installDir
+ctx.setMetadata pkgconfig.lookup("foo")!
+```
+
+`pkgconfig.new` requires `name`, `description`, and `version`. `requires`
+entries are joined with `, `. Public `Libs` and `Cflags` are always emitted,
+including when empty. `pc.libs.private`, `pc.libs.shared`,
+`pc.cflags.private`, and `pc.cflags.shared` replace those fragment lists and
+are omitted from the file when empty. `${pc.libs}` and `${pc.cflags}` are the
+public fragments. Variable references in Formula source use `$${libdir}` so
+the `.pc` file contains `${libdir}`. The Formula still owns the output
+directory, filename, writer lifetime, and the final `pkgconfig.lookup`. Do
+not hand-write the default variables or the property layout when this writer
+is available. Parsing, patching, or relocating an upstream-provided `.pc`
+file remains a separate problem; keep a valid installed file when upstream
+already writes one.
+
+A Formula-authored `.pc` `Version` or `Requires` constraint is part of that
+Formula's stable output. Use the Formula's `fromVer` floor, not the exact
+requested tag. If that pkg-config content must change at a later release, add
+another Formula threshold.
 
 Resolve the pkg-config helper API from the target LLAR revision. When that
 revision provides `pkgconfig.use` and `pkgconfig.lookup`, call
