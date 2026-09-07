@@ -2,7 +2,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 )
 
 id "ebiggers/libdeflate"
@@ -47,12 +46,18 @@ onBuild ctx => {
 	c.build
 	c.install
 
-	// Upstream's generated file embeds CMAKE_INSTALL_PREFIX. Keep its
-	// source-defined fields while making the installed metadata relocatable.
-	pcPath := filepath.join(installDir, "lib", "pkgconfig", "libdeflate.pc")
-	pc := string(os.readFile(pcPath)!)
-	pc = strings.replace(pc, "prefix="+installDir, `prefix=$${pcfiledir}/../..`, 1)
-	os.writeFile(pcPath, []byte(pc), 0o644)!
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "libdeflate",
+		description = "Fast implementation of DEFLATE, zlib, and gzip",
+		version = "v1.15",
+		libs = ["-L$${libdir}", "-ldeflate"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "libdeflate.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("libdeflate")!
