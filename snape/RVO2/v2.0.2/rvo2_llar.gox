@@ -67,18 +67,16 @@ onBuild ctx => {
 
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: rvo2
-Description: Optimal Reciprocal Collision Avoidance
-Version: 2.0.2
-Libs: -L$${libdir} -lRVO
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "rvo2.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "rvo2",
+		description = "Optimal Reciprocal Collision Avoidance",
+		version = "v2.0.2",
+		libs = ["-L$${libdir}", "-lRVO"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "rvo2.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("rvo2")!
