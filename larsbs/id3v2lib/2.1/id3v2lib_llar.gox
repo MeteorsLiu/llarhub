@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
 )
 
 const consumerSource = `#include <id3v2lib-2.0/id3v2lib.h>
@@ -44,8 +43,8 @@ filter => {
 
 onBuild ctx => {
 	installDir := ctx.outputDir
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
@@ -62,18 +61,16 @@ onBuild ctx => {
 	// Upstream CMake installs headers and the library but no pkg-config file.
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: id3v2lib
-Description: Library to read and edit id3 tags from mp3 files
-Version: 2.1
-Libs: -L$${libdir} -lid3v2lib
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "id3v2lib.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "id3v2lib",
+		description = "Library to read and edit id3 tags from mp3 files",
+		version = "2.1",
+		libs = ["-L$${libdir}", "-lid3v2lib"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "id3v2lib.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("id3v2lib")!
@@ -94,7 +91,7 @@ onTest ctx => {
 	binary := filepath.join(testDir, "consumer")
 	cc! consumer, "-o", binary, "@"+flagsFile
 
-	if slices.contains(target.options["shared"], "ON") {
+	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	}
