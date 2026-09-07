@@ -60,23 +60,23 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "COPYING"), os.readFile(filepath.join(ctx.SourceDir, "COPYING"))!, 0o644)!
 
-	pcPath := filepath.join(installDir, "lib", "pkgconfig", "libdxfrw.pc")
-	pc := string(os.readFile(pcPath)!)
-	pc = strings.replace(pc, "prefix="+installDir, "prefix=$${pcfiledir}/../..", 1)
-	pc = strings.replace(pc, "exec_prefix="+installDir, "exec_prefix=$${prefix}", 1)
-	pc = strings.replace(pc, "libdir=|"+filepath.join(installDir, "lib"), "libdir=$${prefix}/lib", 1)
-	pc = strings.replace(pc, "libdir="+filepath.join(installDir, "lib"), "libdir=$${prefix}/lib", 1)
-	pc = strings.replace(pc, "includedir="+filepath.join(installDir, "include"), "includedir=$${prefix}/include", 1)
+	libs := ["-L$${libdir}", "-ldxfrw"]
 	if slices.contains(target.require["os"], "linux") {
-		lines := pc.split("\n")
-		for i, line in lines {
-			if line.hasPrefix("Libs:") && !strings.contains(line, " -lm") {
-				lines[i] = line + " -lm"
-			}
-		}
-		pc = strings.join(lines, "\n")
+		libs <- "-lm"
 	}
-	os.writeFile(pcPath, []byte(pc), 0o644)!
+
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "libdxfrw",
+		description = "DXF read/write library",
+		version = "LC2.2.0",
+		libs = libs,
+		cflags = ["-I$${includedir}/libdxfrw"],
+	)!
+	out := os.create(filepath.join(pcDir, "libdxfrw.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("libdxfrw")!
