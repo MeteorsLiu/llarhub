@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 )
 
@@ -45,8 +44,8 @@ onBuild ctx => {
 	cmakeLists := ctx.Proj.readFile("CMakeLists.txt")!
 	os.writeFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"), cmakeLists, 0o644)!
 
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "LIBAESGM_SRC_DIR", ctx.SourceDir
 	c.defineBool "BUILD_SHARED_LIBS", shared
@@ -62,23 +61,18 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), []byte(license), 0o644)!
 
-	// The upstream 2013.1.1 source has no package metadata. Publish the
-	// installed Aesgm interface as a relocatable pkg-config file instead of
-	// embedding this build's output directory in Formula metadata.
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: Aesgm
-Description: Library implementation of AES cryptographic methods
-Version: 2013.1.1
-Libs: -L$${libdir} -lAesgm
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "Aesgm.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "Aesgm",
+		description = "Library implementation of AES cryptographic methods",
+		version = "2013.1.1",
+		libs = ["-L$${libdir}", "-lAesgm"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "Aesgm.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("Aesgm")!
@@ -99,7 +93,7 @@ onTest ctx => {
 	os.writeFile(flagsFile, []byte(flags), 0o644)!
 	cc! sourcePath, "@"+flagsFile, "-o", binary
 
-	if slices.contains(target.options["shared"], "ON") {
+	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	}
