@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 const consumerSource = `#include <Imath/ImathVec.h>
@@ -58,15 +57,46 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE.md"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE.md"))!, 0o644)!
 
-	// CMake writes prefix from CMAKE_INSTALL_PREFIX. Keep the generated
-	// flags and rewrite the paths so Imath.pc stays relocatable.
-	pcPath := filepath.join(installDir, "lib", "pkgconfig", "Imath.pc")
-	pc := string(os.readFile(pcPath)!)
-	pc = strings.replace(pc, "prefix="+installDir, "prefix=$${pcfiledir}/../..", 1)
-	pc = strings.replace(pc, "exec_prefix="+installDir, "exec_prefix=$${prefix}", 1)
-	pc = strings.replace(pc, "libdir="+filepath.join(installDir, "lib"), "libdir=$${prefix}/lib", 1)
-	pc = strings.replace(pc, "includedir="+filepath.join(installDir, "include"), "includedir=$${prefix}/include", 1)
-	os.writeFile(pcPath, []byte(pc), 0o644)!
+	libStem := ""
+	for entry in os.readDir(filepath.join(installDir, "lib"))! {
+		if entry.isDir {
+			continue
+		}
+		name := entry.name
+		if !name.hasPrefix("libImath") {
+			continue
+		}
+		stem := ""
+		if name.hasSuffix(".a") {
+			stem = name.trimPrefix("lib").trimSuffix(".a")
+		} else if name.hasSuffix(".so") {
+			stem = name.trimPrefix("lib").trimSuffix(".so")
+		} else if name.hasSuffix(".dylib") {
+			stem = name.trimPrefix("lib").trimSuffix(".dylib")
+		}
+		if stem == "" {
+			continue
+		}
+		if libStem == "" || stem.len < libStem.len {
+			libStem = stem
+		}
+	}
+	if libStem == "" {
+		panic "Imath did not install libImath"
+	}
+
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "Imath",
+		description = "OpenEXR Imath library",
+		version = "v3.1.12",
+		libs = ["-L$${libdir}", "-l"+libStem],
+		cflags = ["-I$${includedir}", "-I$${includedir}/Imath"],
+	)!
+	out := os.create(filepath.join(pcDir, "Imath.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("Imath")!
