@@ -2,7 +2,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 )
 
 const consumerSource = `#include <iostream>
@@ -74,44 +73,18 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	pcPath := filepath.join(installDir, "lib", "pkgconfig", "double-conversion.pc")
-	if _, err := os.stat(pcPath); os.isNotExist(err) {
-		version := ""
-		for line in string(os.readFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"))!).split("\n") {
-			if line.hasPrefix("project(double-conversion VERSION ") {
-				version = line.trimPrefix("project(double-conversion VERSION ").split(")")[0]
-				break
-			}
-		}
-		if version == "" {
-			panic "double-conversion CMakeLists.txt has no project version"
-		}
-		pcDir := filepath.dir(pcPath)
-		os.mkdirAll(pcDir, 0o755)!
-		pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: double-conversion
-Description: Efficient binary-decimal and decimal-binary conversion routines for IEEE doubles
-Version: ` + version + `
-Libs: -L$${libdir} -ldouble-conversion
-Cflags: -I$${includedir}
-`
-		os.writeFile(pcPath, []byte(pc), 0o644)!
-	} else if err != nil {
-		panic err
-	} else {
-		// CMake writes prefix, libdir, and includedir from CMAKE_INSTALL_PREFIX.
-		// Keep the generated flags and make the installed file relocatable.
-		pc := string(os.readFile(pcPath)!)
-		pc = strings.replace(pc, "prefix="+installDir, "prefix=$${pcfiledir}/../..", 1)
-		pc = strings.replace(pc, "exec_prefix="+installDir, "exec_prefix=$${prefix}", 1)
-		pc = strings.replace(pc, "libdir="+filepath.join(installDir, "lib"), "libdir=$${prefix}/lib", 1)
-		pc = strings.replace(pc, "includedir="+filepath.join(installDir, "include"), "includedir=$${prefix}/include", 1)
-		os.writeFile(pcPath, []byte(pc), 0o644)!
-	}
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "double-conversion",
+		description = "Efficient binary-decimal and decimal-binary conversion routines for IEEE doubles",
+		version = "v3.3.0",
+		libs = ["-L$${libdir}", "-ldouble-conversion"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "double-conversion.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("double-conversion")!
