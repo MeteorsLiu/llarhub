@@ -61,33 +61,20 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE.md"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE.md"))!, 0o644)!
 
-	version := ""
-	for line in string(os.readFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"))!).split("\n") {
-		if line.hasPrefix("project(meshoptimizer VERSION ") {
-			version = line.trimPrefix("project(meshoptimizer VERSION ").split(" ")[0]
-			break
-		}
-	}
-	if version == "" {
-		panic "meshoptimizer CMakeLists.txt has no project version"
-	}
-
-	// Upstream installs CMake package files only; publish relocatable pkg-config
-	// flags for the installed libmeshoptimizer and meshoptimizer.h.
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
 
-Name: meshoptimizer
-Description: Mesh optimization library that makes meshes smaller and faster to render
-Version: ` + version + `
-Libs: -L$${libdir} -lmeshoptimizer
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "meshoptimizer.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "meshoptimizer",
+		description = "Mesh optimization library that makes meshes smaller and faster to render",
+		version = "v1.2",
+		libs = ["-L$${libdir}", "-lmeshoptimizer"],
+		cflags = ["-I$${includedir}"],
+	)!
+
+	out := os.create(filepath.join(pcDir, "meshoptimizer.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("meshoptimizer")!
