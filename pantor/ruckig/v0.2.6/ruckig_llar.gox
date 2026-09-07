@@ -9,8 +9,6 @@ fromVer "v0.2.6"
 
 onBuild ctx => {
 	installDir := ctx.outputDir
-	includeDir := filepath.join(installDir, "include")
-	libDir := filepath.join(installDir, "lib")
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.buildType "Release"
@@ -32,9 +30,21 @@ onBuild ctx => {
 	c.build
 	c.install
 
-	// Upstream installs headers and the static library under these relocatable
-	// directories; expose the complete flags to dependent consumers.
-	ctx.setMetadata "-I${includeDir} -L${libDir} -lruckig"
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "ruckig",
+		description = "ruckig motion library",
+		version = "v0.2.6",
+		libs = ["-L$${libdir}", "-lruckig"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "ruckig.pc"))!
+	pc.writeTo(out)!
+	out.close()!
+
+	pkgconfig.use installDir
+	ctx.setMetadata pkgconfig.lookup("ruckig")!
 }
 
 onTest ctx => {
@@ -92,4 +102,13 @@ target_link_libraries(test_package PRIVATE ruckig::ruckig)
 
 	binary := filepath.join(testBuild, "test_package")
 	exec! binary
+
+	// Also compile against the published pkg-config flags so a cache-hit
+	// consumer proves ruckig.pc, not only the CMake package files.
+	pkgconfig.use installDir
+	flagsFile := filepath.join(testDir, "ruckig.flags")
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("ruckig")!), 0o644)!
+	pcBinary := filepath.join(testDir, "test_package_pc")
+	exec! "c++", "-std=c++17", filepath.join(testDir, "test_package.cpp"), "-o", pcBinary, "@"+flagsFile
+	exec! pcBinary
 }
