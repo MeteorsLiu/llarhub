@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -124,10 +123,7 @@ onBuild ctx => {
 	installDir := ctx.outputDir
 	shared := target.options["shared"][0] == "ON"
 	fPIC := target.options["fPIC"][0] == "ON"
-	osName := runtime.GOOS
-	if values := target.require["os"]; values.len > 0 {
-		osName = values[0]
-	}
+	osName := target.require["os"][0]
 	buildDir := filepath.join(ctx.SourceDir, "_build")
 
 	// Open-source CMake still defaults to building apps and the driver. Keep
@@ -258,30 +254,28 @@ onBuild ctx => {
 		cflags <- ["-DAJASTATIC"]...
 	}
 
-	libs := "-L$${libdir} -l${linkName}"
+	libs := ["-L$${libdir}", "-l"+linkName]
 	if osName == "linux" {
-		libs += " -lpthread -lrt"
+		libs <- ["-lpthread", "-lrt"]...
 		if shared {
-			libs += " -ldl"
+			libs <- "-ldl"
 		}
 	} else if osName == "darwin" {
-		libs += " -framework CoreFoundation -framework Foundation -framework IOKit"
+		libs <- ["-framework", "CoreFoundation", "-framework", "Foundation", "-framework", "IOKit"]...
 	}
 
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: ntv2
-Description: AJA NTV2 SDK
-Version: 16.2
-Libs: ${libs}
-Cflags: ${cflags.join(" ")}
-`
-	os.writeFile(filepath.join(pcDir, "ntv2.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "ntv2",
+		description = "AJA NTV2 SDK",
+		version = "v16.2",
+		libs = libs,
+		cflags = cflags,
+	)!
+	out := os.create(filepath.join(pcDir, "ntv2.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("ntv2")!
