@@ -1,3 +1,21 @@
+import (
+	"os"
+	"path/filepath"
+)
+
+const consumerSource = `#include <zlib.h>
+#include <stdio.h>
+
+int main(void) {
+	const char *version = zlibVersion();
+	if (version == 0 || version[0] == '\0') {
+		return 1;
+	}
+	printf("%s\n", version);
+	return 0;
+}
+`
+
 id "madler/zlib"
 
 fromVer "1.0.0"
@@ -10,5 +28,36 @@ onBuild ctx => {
 	a.build
 	a.install
 
-	ctx.setMetadata "-lz"
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "zlib",
+		description = "zlib compression library",
+		version = "1.0.0",
+		libs = ["-L$${libdir}", "-lz"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "zlib.pc"))!
+	pc.writeTo(out)!
+	out.close()!
+
+	pkgconfig.use installDir
+	ctx.setMetadata pkgconfig.lookup("zlib")!
+}
+
+onTest ctx => {
+	installDir := ctx.outputDir
+	testDir := filepath.join(ctx.SourceDir, "_llar_consumer")
+	os.mkdirAll(testDir, 0o755)!
+
+	consumer := filepath.join(testDir, "consumer.c")
+	os.writeFile(consumer, []byte(consumerSource), 0o644)!
+
+	pkgconfig.use installDir
+	flagsFile := filepath.join(testDir, "zlib.flags")
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("zlib")!), 0o644)!
+
+	binary := filepath.join(testDir, "consumer")
+	cc! consumer, "-o", binary, "@"+flagsFile
+	exec! binary
 }
