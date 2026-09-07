@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 const consumerSource = `#include <omath/linear_algebra/vector3.hpp>
@@ -58,21 +57,20 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	version := strings.trimSpace(string(os.readFile(filepath.join(ctx.SourceDir, "VERSION"))!))
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
 
-Name: omath
-Description: Cross-platform modern general purpose math library written in C++23
-Version: ` + version + `
-Libs: -L$${libdir} -lomath
-Cflags: -I$${includedir} -DOMATH_SUPRESS_SAFETY_CHECKS -DOMATH_ENABLE_FORCE_INLINE -DOMATH_ENABLE_LEGACY
-`
-	os.writeFile(filepath.join(pcDir, "omath.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "omath",
+		description = "Cross-platform modern general purpose math library written in C++23",
+		version = "v5.0.0",
+		libs = ["-L$${libdir}", "-lomath"],
+		cflags = ["-I$${includedir}", "-DOMATH_SUPRESS_SAFETY_CHECKS", "-DOMATH_ENABLE_FORCE_INLINE", "-DOMATH_ENABLE_LEGACY"],
+	)!
+
+	out := os.create(filepath.join(pcDir, "omath.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("omath")!
