@@ -2,7 +2,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 )
 
 const consumerSource = `#include <oapv.h>
@@ -62,38 +61,32 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	// Upstream installs oapv.pc with CMAKE_INSTALL_PREFIX-expanded paths.
-	// Keep its verified flags while making the installed metadata relocatable.
-	pcPath := filepath.join(installDir, "lib", "pkgconfig", "oapv.pc")
-	lines := string(os.readFile(pcPath)!).split("\n")
-	for i, line in lines {
-		if line.hasPrefix("prefix=") {
-			line = "prefix=$${pcfiledir}/../.."
-		} else if line.hasPrefix("exec_prefix=") {
-			line = "exec_prefix=$${prefix}"
-		} else if line.hasPrefix("libdir=") {
-			line = "libdir=$${prefix}/lib"
-		} else if line.hasPrefix("includedir=") {
-			line = "includedir=$${prefix}/include/oapv"
-		} else if line.hasPrefix("Cflags:") {
-			cflags := "-I$${prefix}/include -I$${includedir}"
-			if !shared {
-				cflags += " -DOAPV_STATIC_DEFINE"
-			}
-			line = "Cflags: " + cflags
-		} else if line.hasPrefix("Libs:") {
-			libs := "-L$${libdir} -loapv"
-			if !shared {
-				libs = "-L$${libdir}/oapv -loapv"
-			}
-			if slices.contains(target.require["os"], "linux") {
-				libs += " -lm -lpthread"
-			}
-			line = "Libs: " + libs
-		}
-		lines[i] = line
+	cflags := ["-I$${prefix}/include", "-I$${includedir}", "-I$${includedir}/oapv"]
+	if !shared {
+		cflags <- "-DOAPV_STATIC_DEFINE"
 	}
-	os.writeFile(pcPath, []byte(strings.join(lines, "\n")), 0o644)!
+	libdirFlag := "-L$${libdir}"
+	if !shared {
+		libdirFlag = "-L$${libdir}/oapv"
+	}
+	libs := [libdirFlag, "-loapv"]
+	if slices.contains(target.require["os"], "linux") {
+		libs <- "-lm"
+		libs <- "-lpthread"
+	}
+
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "oapv",
+		description = "OpenAPV / oapv library",
+		version = "v0.2.1.3-fix",
+		libs = libs,
+		cflags = cflags,
+	)!
+	out := os.create(filepath.join(pcDir, "oapv.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("oapv")!
