@@ -18,7 +18,8 @@ int main() {
 
     ECS_COMPONENT(world, Position);
     ecs_entity_t e = ecs_new(world);
-    ecs_set(world, e, Position, {10.0f, 20.0f});
+    Position pos = {10.0f, 20.0f};
+    ecs_set_id(world, e, ecs_id(Position), sizeof(Position), &pos);
 
     const char *name = ecs_get_name(world, e);
     const Position *p = ecs_get(world, e, Position);
@@ -73,50 +74,31 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	major, minor, patch := "", "", ""
-	for line in string(os.readFile(filepath.join(ctx.SourceDir, "include", "flecs.h"))!).split("\n") {
-		fields := line.trimSpace.split(" ")
-		if fields.len >= 3 && fields[0] == "#define" {
-			if fields[1] == "FLECS_VERSION_MAJOR" {
-				major = fields[2]
-			} else if fields[1] == "FLECS_VERSION_MINOR" {
-				minor = fields[2]
-			} else if fields[1] == "FLECS_VERSION_PATCH" {
-				patch = fields[2]
-			}
-		}
-	}
-	if major == "" || minor == "" || patch == "" {
-		panic "flecs.h has no FLECS_VERSION macros"
-	}
-
 	library := "flecs"
-	cflags := "-I$${includedir}"
+	cflags := ["-I$${includedir}"]
 	if !shared {
 		library = "flecs_static"
-		cflags += " -Dflecs_STATIC"
+		cflags <- "-Dflecs_STATIC"
 	}
-	libs := "-L$${libdir} -l" + library
+	libs := ["-L$${libdir}", "-l"+library]
 	if slices.contains(target.require["os"], "linux") || slices.contains(target.require["os"], "freebsd") {
-		libs += " -lpthread"
+		libs <- "-lpthread"
 	} else if slices.contains(target.require["os"], "windows") {
-		libs += " -lwsock32 -lws2_32"
+		libs <- ["-lwsock32", "-lws2_32"]...
 	}
 
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: flecs
-Description: A fast entity component system (ECS) for C & C++
-Version: ` + major + "." + minor + "." + patch + `
-Libs: ` + libs + `
-Cflags: ` + cflags + `
-`
-	os.writeFile(filepath.join(pcDir, "flecs.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "flecs",
+		description = "A fast entity component system (ECS) for C & C++",
+		version = "v4.0.0",
+		libs = libs,
+		cflags = cflags,
+	)!
+	out := os.create(filepath.join(pcDir, "flecs.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("flecs")!
@@ -127,7 +109,7 @@ onTest ctx => {
 	testDir := filepath.join(ctx.SourceDir, "_llar_consumer")
 	os.mkdirAll(testDir, 0o755)!
 
-	consumer := filepath.join(testDir, "consumer.c")
+	consumer := filepath.join(testDir, "consumer.cpp")
 	os.writeFile(consumer, []byte(consumerSource), 0o644)!
 
 	pkgconfig.use installDir
@@ -135,7 +117,7 @@ onTest ctx => {
 	os.writeFile(flagsFile, []byte(pkgconfig.lookup("flecs")!), 0o644)!
 
 	binary := filepath.join(testDir, "consumer")
-	cc! consumer, "-o", binary, "@"+flagsFile
+	exec! "c++", "-std=c++17", consumer, "-o", binary, "@"+flagsFile
 
 	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
