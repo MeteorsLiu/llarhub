@@ -37,7 +37,7 @@ onBuild ctx => {
 
 	// Conan removes fPIC on Windows; CMake ignores it there as well.
 	if !slices.contains(target.require["os"], "windows") {
-		c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", slices.contains(target.options["fPIC"], "ON")
+		c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", target.options["fPIC"][0] == "ON"
 	}
 
 	c.configure
@@ -45,9 +45,21 @@ onBuild ctx => {
 	c.install
 
 	// No upstream pkg-config file exists; publish the verified consumer flags.
-	includeDir := filepath.join(installDir, "include")
-	libDir := filepath.join(installDir, "lib")
-	ctx.setMetadata "-I${includeDir} -L${libDir} -lqpOASES"
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "qpOASES",
+		description = "qpOASES QP solver",
+		version = "releases/3.1.1",
+		libs = ["-L$${libdir}", "-lqpOASES"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "qpOASES.pc"))!
+	pc.writeTo(out)!
+	out.close()!
+
+	pkgconfig.use installDir
+	ctx.setMetadata pkgconfig.lookup("qpOASES")!
 }
 
 onTest ctx => {
@@ -89,9 +101,11 @@ int main()
 	consumerPath := filepath.join(testDir, "consumer.cpp")
 	os.writeFile(consumerPath, []byte(consumer), 0o644)!
 
-	includeDir := filepath.join(installDir, "include")
-	libDir := filepath.join(installDir, "lib")
+	pkgconfig.use installDir
+	flagsFile := filepath.join(testDir, "qpOASES.flags")
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("qpOASES")!), 0o644)!
+
 	binary := filepath.join(testDir, "consumer")
-	exec! "c++", "-I${includeDir}", consumerPath, "-L${libDir}", "-lqpOASES", "-o", binary
+	exec! "c++", consumerPath, "-o", binary, "@"+flagsFile
 	exec! binary
 }
