@@ -68,35 +68,23 @@ onBuild ctx => {
 		}
 	}
 
-	version := ""
-	for line in source.split("\n") {
-		if line.contains(`VERSION "`) {
-			version = line.split(`"`)[1]
-			break
-		}
-	}
-	if version == "" {
-		panic "zip CMakeLists.txt has no project version"
+	cflags := ["-I$${includedir}"]
+	if shared {
+		cflags <- "-DZIP_SHARED"
 	}
 
-	cflags := "-I$${includedir}"
-	if shared {
-		cflags += " -DZIP_SHARED"
-	}
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: zip
-Description: A portable, simple zip library written in C
-Version: ` + version + `
-Libs: -L$${libdir} -lzip
-Cflags: ` + cflags + `
-`
-	os.writeFile(filepath.join(pcDir, "zip.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "zip",
+		description = "A portable, simple zip library written in C",
+		version = "v0.3.2",
+		libs = ["-L$${libdir}", "-lzip"],
+		cflags = cflags,
+	)!
+	out := os.create(filepath.join(pcDir, "zip.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("zip")!
