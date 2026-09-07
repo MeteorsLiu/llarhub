@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
 )
 
 const consumerSource = `#include <stdio.h>
@@ -46,8 +45,8 @@ onBuild ctx => {
 	cmakeLists := ctx.Proj.readFile("v1.0.0/CMakeLists.txt")!
 	os.writeFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"), cmakeLists, 0o644)!
 
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "SEMVER_C_SRC_DIR", ctx.SourceDir
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
@@ -67,18 +66,16 @@ onBuild ctx => {
 	// complete cflags-and-libs result used by installed consumers.
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: semver.c
-Description: Semantic versioning for C
-Version: 1.0.0
-Libs: -L$${libdir} -lsemver.c
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "semver.c.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "semver.c",
+		description = "Semantic versioning for C",
+		version = "v1.0.0",
+		libs = ["-L$${libdir}", "-lsemver.c"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "semver.c.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("semver.c")!
@@ -92,7 +89,7 @@ onTest ctx => {
 	consumer := filepath.join(testDir, "consumer.c")
 	os.writeFile(consumer, []byte(consumerSource), 0o644)!
 
-	shared := slices.contains(target.options["shared"], "ON")
+	shared := target.options["shared"][0] == "ON"
 	binary := filepath.join(testDir, "consumer")
 	pkgconfig.use installDir
 	flagsFile := filepath.join(testDir, "semver.c.flags")
