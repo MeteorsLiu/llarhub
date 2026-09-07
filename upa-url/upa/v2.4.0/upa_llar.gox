@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 const consumerSource = `#include "upa/url.h"
@@ -60,32 +59,20 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	version := ""
-	for line in string(os.readFile(filepath.join(ctx.SourceDir, "include", "upa", "url_version.h"))!).split("\n") {
-		fields := strings.fields(line)
-		if fields.len >= 3 && fields[0] == "#define" && fields[1] == "UPA_URL_VERSION" {
-			version = strings.trim(fields[2], `"`)
-			break
-		}
-	}
-	if version == "" {
-		panic "upa url_version.h has no UPA_URL_VERSION"
-	}
-
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
 
-Name: upa_url
-Description: An implementation of the WHATWG URL Standard in C++
-Version: ` + version + `
-Libs: -L$${libdir} -lupa_url
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "upa_url.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "upa_url",
+		description = "An implementation of the WHATWG URL Standard in C++",
+		version = "v2.4.0",
+		libs = ["-L$${libdir}", "-lupa_url"],
+		cflags = ["-I$${includedir}"],
+	)!
+
+	out := os.create(filepath.join(pcDir, "upa_url.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("upa_url")!
