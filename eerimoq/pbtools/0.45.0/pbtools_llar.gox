@@ -1,8 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 )
 
 const consumerSource = `#include <pbtools.h>
@@ -112,8 +110,8 @@ filter => {
 
 onBuild ctx => {
 	installDir := ctx.outputDir
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
 
 	c := cmake.new(filepath.join(ctx.SourceDir, "lib"), filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_POLICY_VERSION_MINIMUM", "3.5"
@@ -128,31 +126,20 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	version := ""
-	for line in string(os.readFile(filepath.join(ctx.SourceDir, "pbtools", "version.py"))!).split("\n") {
-		if line.hasPrefix("__version__ = ") {
-			version = strings.trim(line.trimPrefix("__version__ = "), `'"`)
-			break
-		}
-	}
-	if version == "" {
-		panic "pbtools/version.py has no __version__"
-	}
-
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
 
-Name: pbtools
-Description: Google Protocol Buffers C library
-Version: ` + version + `
-Libs: -L$${libdir} -lpbtools
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "pbtools.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "pbtools",
+		description = "Google Protocol Buffers C library",
+		version = "0.45.0",
+		libs = ["-L$${libdir}", "-lpbtools"],
+		cflags = ["-I$${includedir}"],
+	)!
+
+	out := os.create(filepath.join(pcDir, "pbtools.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("pbtools")!
@@ -173,7 +160,7 @@ onTest ctx => {
 	binary := filepath.join(testDir, "consumer")
 	cc! "-std=c11", consumer, "-o", binary, "@"+flagsFile
 
-	if slices.contains(target.options["shared"], "ON") {
+	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	}
