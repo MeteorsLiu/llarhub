@@ -31,25 +31,19 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "copying.txt"), os.readFile(filepath.join(ctx.SourceDir, "copying.txt"))!, 0o644)!
 
-	// LLAR's shallow tag checkout records the selected annotated tag only in
-	// FETCH_HEAD, without creating refs/tags for git describe.
-	fetchHead := string(os.readFile(filepath.join(ctx.SourceDir, ".git", "FETCH_HEAD"))!)
-	version := fetchHead.splitN("'", 3)[1]
-
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
 
-Name: glm
-Description: OpenGL Mathematics (GLM)
-Version: ` + version + `
-Libs:
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "glm.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "glm",
+		description = "OpenGL Mathematics (GLM)",
+		version = "1.0.1",
+		cflags = ["-I$${includedir}"],
+	)!
+
+	out := os.create(filepath.join(pcDir, "glm.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("glm")!
