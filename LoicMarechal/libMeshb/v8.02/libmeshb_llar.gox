@@ -60,46 +60,24 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE.txt"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE.txt"))!, 0o644)!
 
-	major := ""
-	minor := ""
-	for line in string(os.readFile(cmakeLists)!).split("\n") {
-		fields := strings.fields(line)
-		if fields.len < 3 || fields[0] != "set" {
-			continue
-		}
-		name := strings.trim(fields[1], "()")
-		value := strings.trim(fields[2], "()")
-		if name == "libMeshb_VERSION_MAJOR" {
-			major = value
-		}
-		if name == "libMeshb_VERSION_MINOR" {
-			minor = value
-		}
-	}
-	if major == "" || minor == "" {
-		panic "libMeshb CMakeLists.txt has no project version"
-	}
-	version := major + "." + minor
-
-	libs := "-lMeshb.8"
+	libs := ["-L$${libdir}", "-lMeshb.8"]
 	if slices.contains(target.require["os"], "linux") {
-		libs += " -lrt -lm"
+		libs <- "-lrt"
+		libs <- "-lm"
 	}
 
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: libmeshb
-Description: A library to handle the *.meshb file format.
-Version: ${version}
-Libs: -L$${libdir} ${libs}
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "libmeshb.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "libmeshb",
+		description = "A library to handle the *.meshb file format.",
+		version = "v8.02",
+		libs = libs,
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "libmeshb.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("libmeshb")!
