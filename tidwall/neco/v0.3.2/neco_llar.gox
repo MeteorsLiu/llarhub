@@ -47,8 +47,8 @@ onBuild ctx => {
 	cmakeLists := ctx.Proj.readFile("v0.3.2/CMakeLists.txt")!
 	os.writeFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"), cmakeLists, 0o644)!
 
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "TIDWALL_NECO_SRC_DIR", ctx.SourceDir
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
@@ -63,28 +63,22 @@ onBuild ctx => {
 	license := os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), license, 0o644)!
 
-	// LLAR checks out the selected tag into a shallow repository; use FETCH_HEAD
-	// so the installed metadata reports the exact source version.
-	fetchHead := string(os.readFile(filepath.join(ctx.SourceDir, ".git", "FETCH_HEAD"))!)
-	version := fetchHead.splitN("'", 3)[1][1:]
-	libs := "-L$${libdir} -lneco"
+	libs := ["-L$${libdir}", "-lneco"]
 	if slices.contains(target.require["os"], "linux") || slices.contains(target.require["os"], "freebsd") {
-		libs += " -lpthread -ldl"
+		libs <- ["-lpthread", "-ldl"]...
 	}
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: neco
-Description: Coroutine library for C
-Version: ` + version + `
-Libs: ` + libs + `
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "neco.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "neco",
+		description = "Coroutine library for C",
+		version = "v0.1.0",
+		libs = libs,
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "neco.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("neco")!
@@ -106,7 +100,7 @@ onTest ctx => {
 	args <- []string{"-o", binary}...
 	cc! args...
 
-	if slices.contains(target.options["shared"], "ON") {
+	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	}
