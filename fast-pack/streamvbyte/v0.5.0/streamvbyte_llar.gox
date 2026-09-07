@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 )
 
@@ -48,7 +47,7 @@ filter => {
 
 onBuild ctx => {
 	installDir := ctx.outputDir
-	shared := slices.contains(target.options["shared"], "ON")
+	shared := target.options["shared"][0] == "ON"
 
 	cmakeLists := string(os.readFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"))!)
 	// Older tags explicitly disable macOS RPATH. Restore the relocatable
@@ -78,33 +77,18 @@ onBuild ctx => {
 		}
 	}
 
-	version := ""
-	for line in cmakeLists.split("\n") {
-		if strings.contains(line, "project(STREAMVBYTE VERSION") {
-			parts := strings.split(line, "\"")
-			if parts.len >= 2 {
-				version = parts[1]
-			}
-			break
-		}
-	}
-	if version == "" {
-		panic "streamvbyte CMakeLists.txt has no project version"
-	}
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: streamvbyte
-Description: Fast integer compression in C using the StreamVByte codec
-Version: ` + version + `
-Libs: -L$${libdir} -l` + library + `
-Cflags: -I$${includedir}
-`
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	os.writeFile(filepath.join(pcDir, "streamvbyte.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "streamvbyte",
+		description = "Fast integer compression in C using the StreamVByte codec",
+		version = "v0.5.0",
+		libs = ["-L$${libdir}", "-l"+library],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "streamvbyte.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("streamvbyte")!
@@ -118,7 +102,7 @@ onTest ctx => {
 	sourcePath := filepath.join(testDir, "consumer.c")
 	os.writeFile(sourcePath, []byte(consumerProgram), 0o644)!
 
-	shared := slices.contains(target.options["shared"], "ON")
+	shared := target.options["shared"][0] == "ON"
 
 	pkgconfig.use installDir
 	flags := pkgconfig.lookup("streamvbyte")!
