@@ -72,23 +72,27 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "COPYING"), os.readFile(filepath.join(ctx.SourceDir, "COPYING"))!, 0o644)!
 
-	pcPath := filepath.join(installDir, "lib", "pkgconfig", "dime.pc")
-	pc := string(os.readFile(pcPath)!)
-	pc = strings.replace(pc, "prefix="+installDir, "prefix=$${pcfiledir}/../..", 1)
-	pc = strings.replace(pc, "exec_prefix="+installDir, "exec_prefix=$${prefix}", 1)
-	pc = strings.replace(pc, "libdir="+filepath.join(installDir, "lib"), "libdir=$${prefix}/lib", 1)
-	pc = strings.replace(pc, "includedir="+filepath.join(installDir, "include"), "includedir=$${prefix}/include", 1)
-	lines := pc.split("\n")
-	for i, line in lines {
-		if line.hasPrefix("Cflags:") && fixbig && !strings.contains(line, "DIME_FIXBIG") {
-			line += " -DDIME_FIXBIG"
-		}
-		if line.hasPrefix("Libs:") && slices.contains(target.require["os"], "linux") && !strings.contains(line, " -lm") {
-			line += " -lm"
-		}
-		lines[i] = line
+	libs := ["-L$${libdir}", "-ldime"]
+	if slices.contains(target.require["os"], "linux") {
+		libs <- "-lm"
 	}
-	os.writeFile(pcPath, []byte(strings.join(lines, "\n")), 0o644)!
+	cflags := ["-I$${includedir}"]
+	if fixbig {
+		cflags <- "-DDIME_FIXBIG"
+	}
+
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "dime",
+		description = "DXF import/export (dime)",
+		version = "dime-0.9.1",
+		libs = libs,
+		cflags = cflags,
+	)!
+	out := os.create(filepath.join(pcDir, "dime.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("dime")!
