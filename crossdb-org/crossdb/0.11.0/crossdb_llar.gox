@@ -35,29 +35,23 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	// Shallow checkouts have no local tags; FETCH_HEAD records the requested tag.
-	fetchHead := string(os.readFile(filepath.join(ctx.SourceDir, ".git", "FETCH_HEAD"))!)
-	version := fetchHead.splitN("'", 3)[1]
-
-	libs := "-L$${libdir} -lcrossdb"
+	libs := ["-L$${libdir}", "-lcrossdb"]
 	if slices.contains(target.require["os"], "linux") || slices.contains(target.require["os"], "freebsd") {
-		libs += " -lpthread"
+		libs <- "-lpthread"
 	}
 
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: crossdb
-Description: Ultra High-performance Lightweight Embedded and Server OLTP RDBMS
-Version: ` + version + `
-Libs: ` + libs + `
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "crossdb.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "crossdb",
+		description = "Ultra High-performance Lightweight Embedded and Server OLTP RDBMS",
+		version = "0.11.0",
+		libs = libs,
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "crossdb.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("crossdb")!
