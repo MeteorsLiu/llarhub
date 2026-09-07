@@ -48,8 +48,8 @@ filter => {
 
 onBuild ctx => {
 	installDir := ctx.outputDir
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
 
 	cflags := "-std=c99 -O3"
 	if shared || fPIC {
@@ -92,18 +92,17 @@ onBuild ctx => {
 
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
 
-Name: pdfgen
-Description: Simple C PDF Writer/Generation library
-Version: 0.1.0
-Libs: -L$${libdir} -lpdfgen
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "pdfgen.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "pdfgen",
+		description = "Simple C PDF Writer/Generation library",
+		version = "0.1.0",
+		libs = ["-L$${libdir}", "-lpdfgen"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "pdfgen.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("pdfgen")!
@@ -123,7 +122,7 @@ onTest ctx => {
 	os.writeFile(flagsFile, []byte(pkgconfig.lookup("pdfgen")!), 0o644)!
 	cc! sourcePath, "@"+flagsFile, "-o", binary
 
-	if slices.contains(target.options["shared"], "ON") {
+	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	}
