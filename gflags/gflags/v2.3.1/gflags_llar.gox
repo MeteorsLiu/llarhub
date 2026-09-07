@@ -2,7 +2,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 )
 
 const consumerSource = `#include <gflags/gflags.h>
@@ -74,29 +73,27 @@ onBuild ctx => {
 		libName = "gflags_nothreads"
 	}
 
-	pcPath := filepath.join(installDir, "lib", "pkgconfig", "gflags.pc")
-	pc := string(os.readFile(pcPath)!)
-	pc = strings.replace(pc, "prefix="+installDir, "prefix=$${pcfiledir}/../..", 1)
-	pc = strings.replace(pc, "exec_prefix="+installDir, "exec_prefix=$${prefix}", 1)
-	pc = strings.replace(pc, "libdir="+filepath.join(installDir, "lib"), "libdir=$${prefix}/lib", 1)
-	pc = strings.replace(pc, "includedir="+filepath.join(installDir, "include"), "includedir=$${prefix}/include", 1)
-	pc = strings.replace(pc, "-lgflags", "-l"+libName, 1)
+	libs := ["-L$${libdir}", "-l"+libName]
 	if slices.contains(target.require["os"], "linux") {
-		lines := pc.split("\n")
-		for i, line in lines {
-			if line.hasPrefix("Libs:") {
-				if !strings.contains(line, " -lm") {
-					line += " -lm"
-				}
-				if !nothreads && !strings.contains(line, " -lpthread") && !strings.contains(line, " -pthread") {
-					line += " -lpthread"
-				}
-				lines[i] = line
-			}
+		libs <- "-lm"
+		if !nothreads {
+			libs <- "-lpthread"
 		}
-		pc = strings.join(lines, "\n")
 	}
-	os.writeFile(pcPath, []byte(pc), 0o644)!
+
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "gflags",
+		description = "A commandline flags library that allows for distributed flags.",
+		version = "v2.3.1",
+		URL = "http://gflags.github.io/gflags",
+		libs = libs,
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "gflags.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("gflags")!
