@@ -1,6 +1,5 @@
 import "os"
 import "path/filepath"
-import "strings"
 
 id "JuliaStrings/utf8proc"
 
@@ -30,14 +29,21 @@ onBuild ctx => {
 	c.build
 	c.install
 
-	// CMake writes absolute paths and its upstream Cflags use the build-only
-	// export define. Keep the installed pkg-config contract relocatable and
-	// expose the static consumer define from the actual build mode.
-	pcPath := filepath.join(installDir, "lib", "pkgconfig", "libutf8proc.pc")
-	pc := string(os.readFile(pcPath)!)
-	pc = strings.replaceAll(pc, installDir, `$${pcfiledir}/../..`)
-	pc = strings.replace(pc, "-DUTF8PROC_EXPORTS", "-DUTF8PROC_STATIC", 1)
-	os.writeFile(pcPath, []byte(pc), 0o644)!
+	// CMake installs libutf8proc.pc with absolute prefix paths and the
+	// build-only UTF8PROC_EXPORTS define. Rewrite a relocatable static
+	// consumer contract; Version is the Formula fromVer floor.
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "libutf8proc",
+		description = "UTF8 processing",
+		version = "v2.7.0",
+		libs = ["-L$${libdir}", "-lutf8proc"],
+		cflags = ["-I$${includedir}", "-DUTF8PROC_STATIC"],
+	)!
+	out := os.create(filepath.join(pcDir, "libutf8proc.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("libutf8proc")!
