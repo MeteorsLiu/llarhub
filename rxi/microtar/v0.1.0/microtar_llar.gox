@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
 )
 
 const consumerSource = `#include <stdio.h>
@@ -58,8 +57,8 @@ onBuild ctx => {
 	cmakeLists := ctx.Proj.readFile("v0.1.0/CMakeLists.txt")!
 	os.writeFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"), cmakeLists, 0o644)!
 
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "MICROTAR_SRC_DIR", ctx.SourceDir
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
@@ -75,18 +74,18 @@ onBuild ctx => {
 
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${exec_prefix}/lib
-includedir=$${prefix}/include
 
-Name: microtar
-Description: A lightweight tar library written in ANSI C
-Version: 0.1.0
-Libs: -L$${libdir} -lmicrotar
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "microtar.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "microtar",
+		description = "A lightweight tar library written in ANSI C",
+		version = "v0.1.0",
+		libs = ["-L$${libdir}", "-lmicrotar"],
+		cflags = ["-I$${includedir}"],
+	)!
+
+	out := os.create(filepath.join(pcDir, "microtar.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("microtar")!
@@ -107,10 +106,10 @@ onTest ctx => {
 	os.writeFile(flagsFile, []byte(pkgconfig.lookup("microtar")!), 0o644)!
 	cc! sourcePath, "@"+flagsFile, "-o", binary
 
-	if slices.contains(target.options["shared"], "ON") {
+	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
-		if slices.contains(target.require["os"], "windows") {
+		if target.require["os"][0] == "windows" {
 			path := os.getenv("PATH")
 			os.setenv("PATH", filepath.join(installDir, "bin")+";"+path)!
 		}
