@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
 )
 
 const consumerSource = `#include <pystring.h>
@@ -47,11 +46,10 @@ onBuild ctx => {
 
 	cmakeLists := ctx.Proj.readFile("v1.0.0/CMakeLists.txt")!
 	os.writeFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"), cmakeLists, 0o644)!
-	pcTemplate := ctx.Proj.readFile("v1.0.0/pystring.pc.in")!
-	os.writeFile(filepath.join(ctx.SourceDir, "pystring.pc.in"), pcTemplate, 0o644)!
+	os.writeFile(filepath.join(ctx.SourceDir, "pystring.pc.in"), []byte(""), 0o644)!
 
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "PYSTRING_SRC_DIR", ctx.SourceDir
 	c.define "PYSTRING_PC_IN", filepath.join(ctx.SourceDir, "pystring.pc.in")
@@ -66,6 +64,19 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "pystring",
+		description = "C++ string utilities (pystring)",
+		version = "v1.0.0",
+		libs = ["-L$${libdir}", "-lpystring"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "pystring.pc"))!
+	pc.writeTo(out)!
+	out.close()!
+
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("pystring")!
 }
@@ -78,14 +89,14 @@ onTest ctx => {
 	consumer := filepath.join(testDir, "consumer.cpp")
 	os.writeFile(consumer, []byte(consumerSource), 0o644)!
 
-	binary := filepath.join(testDir, "consumer")
 	pkgconfig.use installDir
-	flags := pkgconfig.lookup("pystring")!.replaceAll(`\|`, `|`).fields
-	args := []string{consumer, "-o", binary}
-	args <- flags...
-	exec! "c++", args...
+	flagsFile := filepath.join(testDir, "pystring.flags")
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("pystring")!), 0o644)!
 
-	if slices.contains(target.options["shared"], "ON") {
+	binary := filepath.join(testDir, "consumer")
+	exec! "c++", consumer, "-o", binary, "@"+flagsFile
+
+	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	}
