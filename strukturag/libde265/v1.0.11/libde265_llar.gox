@@ -4,6 +4,15 @@ import (
 	"strings"
 )
 
+const consumerSource = `#include <libde265/de265.h>
+
+int main(void) {
+    de265_decoder_context *ctx = de265_new_decoder();
+    de265_free_decoder(ctx);
+    return 0;
+}
+`
+
 id "strukturag/libde265"
 
 fromVer "v1.0.11"
@@ -36,7 +45,7 @@ onBuild ctx => {
 	cmakeLists := filepath.join(ctx.SourceDir, "CMakeLists.txt")
 	source := string(os.readFile(cmakeLists)!)
 	source = strings.replace(source, "set(CMAKE_POSITION_INDEPENDENT_CODE ON)\n", "", 1)
-	os.writeFile(cmakeLists, []byte(source), 0644)!
+	os.writeFile(cmakeLists, []byte(source), 0o644)!
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
@@ -50,37 +59,37 @@ onBuild ctx => {
 	c.install
 
 	licenseDir := filepath.join(installDir, "licenses")
-	os.mkdirAll(licenseDir, 0755)!
-	os.writeFile(filepath.join(licenseDir, "COPYING"), os.readFile(filepath.join(ctx.SourceDir, "COPYING"))!, 0644)!
+	os.mkdirAll(licenseDir, 0o755)!
+	os.writeFile(filepath.join(licenseDir, "COPYING"), os.readFile(filepath.join(ctx.SourceDir, "COPYING"))!, 0o644)!
 
-	// The upstream file embeds the install directory and keeps static runtime
-	// libraries private. Make the published metadata relocatable and complete
-	// for the static C consumer used by this Formula.
-	pcPath := filepath.join(installDir, "lib", "pkgconfig", "libde265.pc")
-	pc := string(os.readFile(pcPath)!)
-	pc = strings.replace(pc, "prefix="+installDir, "prefix=$${pcfiledir}/../..", 1)
-	lines := pc.split("\n")
-	privateLibs := ""
-	privateCflags := ""
-	for line in lines {
-		if line.hasPrefix("Libs.private:") {
-			privateLibs = line.trimPrefix("Libs.private:").trimSpace()
-		}
-		if line.hasPrefix("Cflags.private:") {
-			privateCflags = line.trimPrefix("Cflags.private:").trimSpace()
-		}
-	}
+	libs := ["-L$${libdir}", "-lde265"]
+	cflags := ["-I$${includedir}"]
 	if !shared {
-		for i, line in lines {
-			if privateLibs != "" && line.hasPrefix("Libs:") {
-				lines[i] = line + " " + privateLibs
-			}
-			if privateCflags != "" && line.hasPrefix("Cflags:") {
-				lines[i] = line + " " + privateCflags
-			}
+		osName := target.require["os"][0]
+		if osName == "darwin" {
+			libs <- "-lc++"
+		} else {
+			libs <- "-lstdc++"
 		}
+		if osName == "linux" || osName == "freebsd" {
+			libs <- "-lpthread"
+			libs <- "-lm"
+		}
+		cflags <- "-DLIBDE265_STATIC_BUILD"
 	}
-	os.writeFile(pcPath, []byte(strings.join(lines, "\n")), 0644)!
+
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "libde265",
+		description = "Open H.265/HEVC decoder",
+		version = "v1.0.11",
+		libs = libs,
+		cflags = cflags,
+	)!
+	out := os.create(filepath.join(pcDir, "libde265.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("libde265")!
@@ -93,21 +102,14 @@ onTest ctx => {
 	consumer := filepath.join(testDir, "consumer.c")
 	binary := filepath.join(testBuild, "consumer")
 
-	os.mkdirAll(testDir, 0755)!
-	os.mkdirAll(testBuild, 0755)!
-	os.writeFile(consumer, []byte(`#include <libde265/de265.h>
-
-int main(void) {
-    de265_decoder_context *ctx = de265_new_decoder();
-    de265_free_decoder(ctx);
-    return 0;
-}
-`), 0644)!
+	os.mkdirAll(testDir, 0o755)!
+	os.mkdirAll(testBuild, 0o755)!
+	os.writeFile(consumer, []byte(consumerSource), 0o644)!
 
 	pkgconfig.use installDir
 	flags := pkgconfig.lookup("libde265")!
 	flagsFile := filepath.join(testDir, "libde265.flags")
-	os.writeFile(flagsFile, []byte(flags), 0644)!
+	os.writeFile(flagsFile, []byte(flags), 0o644)!
 
 	cc! "-std=c11", consumer, "-o", binary, "@"+flagsFile
 	if target.options["shared"][0] == "ON" {
