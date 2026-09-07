@@ -55,13 +55,22 @@ onBuild ctx => {
 	license := os.readFile(filepath.join(ctx.SourceDir, "license.txt"))!
 	os.writeFile(filepath.join(licenseDir, "license.txt"), license, 0o644)!
 
-	// The upstream file embeds the build output path. Make it relocatable
-	// before using the installed pkg-config contract for Formula metadata.
-	pcPath := filepath.join(installDir, "lib", "pkgconfig", "chaiscript.pc")
-	pc := string(os.readFile(pcPath)!)
-	pc = strings.replace(pc, "prefix="+installDir, `prefix=$${pcfiledir}/../..`, 1)
-	pc = strings.replace(pc, "Libs: ", "Libs: -ldl -pthread", 1)
-	os.writeFile(pcPath, []byte(pc), 0o644)!
+	// Upstream CMake writes a non-relocatable chaiscript.pc whose Libs line
+	// is empty. Replace it with the relocatable consumer contract: headers
+	// plus the -ldl -pthread extras previously patched in. There is no
+	// linkable libchaiscript archive; modules are loaded from lib/chaiscript.
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "chaiscript",
+		description = "ChaiScript embedded scripting",
+		version = "v5.0.0",
+		libs = ["-ldl", "-pthread"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "chaiscript.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("chaiscript")!
