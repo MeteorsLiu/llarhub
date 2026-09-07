@@ -2,7 +2,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 )
 
 const consumerSource = `#include <yyjson.h>
@@ -80,15 +79,23 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	// CMake writes prefix, libdir, and includedir from CMAKE_INSTALL_PREFIX.
-	// Keep the generated flags and make the installed file relocatable.
-	pcPath := filepath.join(installDir, "lib", "pkgconfig", "yyjson.pc")
-	pc := string(os.readFile(pcPath)!)
-	pc = strings.replace(pc, "prefix="+installDir, "prefix=$${pcfiledir}/../..", 1)
-	pc = strings.replace(pc, "exec_prefix="+installDir, "exec_prefix=$${prefix}", 1)
-	pc = strings.replace(pc, "libdir="+filepath.join(installDir, "lib"), "libdir=$${prefix}/lib", 1)
-	pc = strings.replace(pc, "includedir="+filepath.join(installDir, "include"), "includedir=$${prefix}/include", 1)
-	os.writeFile(pcPath, []byte(pc), 0o644)!
+	cflags := ["-I$${includedir}"]
+	if shared && slices.contains(target.require["os"], "windows") {
+		cflags <- "-DYYJSON_IMPORTS"
+	}
+
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "yyjson",
+		description = "Fastest JSON library in C",
+		version = "0.9.0",
+		libs = ["-L$${libdir}", "-lyyjson"],
+		cflags = cflags,
+	)!
+	out := os.create(filepath.join(pcDir, "yyjson.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("yyjson")!
