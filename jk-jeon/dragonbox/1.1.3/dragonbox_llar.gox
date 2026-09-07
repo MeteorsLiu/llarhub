@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 )
 
@@ -47,7 +46,7 @@ onBuild ctx => {
 	os.writeFile(patchPath, patch, 0o644)!
 	git! "-C", ctx.SourceDir, "apply", "--unidiff-zero", "-p2", patchPath
 
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	fPIC := target.options["fPIC"][0] == "ON"
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
 	c.defineBool "DRAGONBOX_INSTALL_TO_CHARS", true
@@ -63,30 +62,21 @@ onBuild ctx => {
 		os.writeFile(filepath.join(licenseDir, name), license, 0o644)!
 	}
 
-	pkgconfigDir := filepath.join(installDir, "lib", "pkgconfig")
-	os.mkdirAll(pkgconfigDir, 0o755)!
-	source := string(os.readFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"))!)
-	versionNeedle := "project(dragonbox\n        VERSION "
-	versionStart := strings.index(source, versionNeedle)
-	if versionStart < 0 {
-		panic "dragonbox CMakeLists.txt does not declare a project version"
-	}
-	versionStart += versionNeedle.len
-	versionEnd := strings.index(source[versionStart:], "\n")
-	if versionEnd < 0 {
-		panic "dragonbox CMakeLists.txt project version is not terminated"
-	}
-	version := strings.trimSpace(source[versionStart : versionStart+versionEnd])
-	pc := `Name: dragonbox
-Description: Dragonbox floating-point to_chars library
-Version: ` + version + `
-prefix=$${pcfiledir}/../..
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-Libs: -L$${libdir} -ldragonbox_to_chars
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pkgconfigDir, "dragonbox.pc"), []byte(pc), 0o644)!
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+
+	pc := pkgconfig.new(
+		name = "dragonbox",
+		description = "Dragonbox floating-point to_chars library",
+		version = "1.0.0",
+		libs = ["-L$${libdir}", "-ldragonbox_to_chars"],
+		cflags = ["-I$${includedir}"],
+	)!
+
+	out := os.create(filepath.join(pcDir, "dragonbox.pc"))!
+	pc.writeTo(out)!
+	out.close()!
+
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("dragonbox")!
 }
