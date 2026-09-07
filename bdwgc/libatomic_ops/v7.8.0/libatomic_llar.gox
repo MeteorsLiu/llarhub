@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 const consumerSource = `#include "atomic_ops_stack.h"
@@ -114,16 +113,18 @@ onBuild ctx => {
 		os.writeFile(filepath.join(licenseDir, name), license, 0o644)!
 	}
 
-	// CMake writes the upstream pkg-config file with the build prefix. Keep
-	// its verified flags while making the installed package relocatable and
-	// exposing the GPL extension's transitive core-library dependency.
-	pcPath := filepath.join(installDir, "lib", "pkgconfig", "atomic_ops.pc")
-	pc := string(os.readFile(pcPath)!)
-	pc = strings.replace(pc, "prefix="+installDir, "prefix=$${pcfiledir}/../..", 1)
-	pc = strings.replace(pc, "libdir="+filepath.join(installDir, "lib"), "libdir=$${prefix}/lib", 1)
-	pc = strings.replace(pc, "includedir="+filepath.join(installDir, "include"), "includedir=$${prefix}/include", 1)
-	pc = strings.replace(pc, "Libs: -L$${libdir} -latomic_ops", "Libs: -L$${libdir} -latomic_ops_gpl -latomic_ops", 1)
-	os.writeFile(pcPath, []byte(pc), 0o644)!
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "atomic_ops",
+		description = "libatomic_ops",
+		version = "v7.8.0",
+		libs = ["-L$${libdir}", "-latomic_ops_gpl", "-latomic_ops"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "atomic_ops.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("atomic_ops")!
