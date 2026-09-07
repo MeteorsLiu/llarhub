@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 )
 
@@ -55,19 +54,19 @@ onBuild ctx => {
 
 	configPath := filepath.join(ctx.SourceDir, "heatshrink_config.h")
 	config := string(os.readFile(configPath)!)
-	if slices.contains(target.options["dynamic_alloc"], "OFF") {
+	if target.options["dynamic_alloc"][0] == "OFF" {
 		config = strings.replace(config, "#define HEATSHRINK_DYNAMIC_ALLOC 1", "#define HEATSHRINK_DYNAMIC_ALLOC 0", 1)
 	}
-	if slices.contains(target.options["debug_log"], "ON") {
+	if target.options["debug_log"][0] == "ON" {
 		config = strings.replace(config, "#define HEATSHRINK_DEBUGGING_LOGS 0", "#define HEATSHRINK_DEBUGGING_LOGS 1", 1)
 	}
-	if slices.contains(target.options["use_index"], "OFF") {
+	if target.options["use_index"][0] == "OFF" {
 		config = strings.replace(config, "#define HEATSHRINK_USE_INDEX 1", "#define HEATSHRINK_USE_INDEX 0", 1)
 	}
 	os.writeFile(configPath, []byte(config), 0o644)!
 
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "HEATSHRINK_SRC_DIR", ctx.SourceDir
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
@@ -82,29 +81,18 @@ onBuild ctx => {
 	license := os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), license, 0o644)!
 
-	version := ""
-	common := string(os.readFile(filepath.join(ctx.SourceDir, "heatshrink_common.h"))!)
-	for line in common.split("\n") {
-		if line.hasPrefix("/* Version ") {
-			version = line.trimSpace.trimPrefix("/* Version ").trimSuffix(" */")
-			break
-		}
-	}
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: heatshrink
-Description: data compression/decompression library for embedded/real-time systems
-Version: @VERSION@
-Libs: -L$${libdir} -lheatshrink
-Cflags: -I$${includedir}
-`
-	pc = strings.replace(pc, "@VERSION@", version, 1)
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	os.writeFile(filepath.join(pcDir, "heatshrink.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "heatshrink",
+		description = "data compression/decompression library for embedded/real-time systems",
+		version = "v0.3.0",
+		libs = ["-L$${libdir}", "-lheatshrink"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "heatshrink.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("heatshrink")!
