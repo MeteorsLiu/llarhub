@@ -2,7 +2,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 )
 
 const consumerSource = `#include <cstdio>
@@ -73,31 +72,20 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	version := ""
-	for line in string(os.readFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"))!).split("\n") {
-		if line.hasPrefix("set(mstch_VERSION ") {
-			version = line.trimPrefix("set(mstch_VERSION ").trimSuffix(")")
-			break
-		}
-	}
-	if version == "" {
-		panic "mstch CMakeLists.txt has no mstch_VERSION"
-	}
-
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
 
-Name: mstch
-Description: libmstch implemented in terms of C++17 variant
-Version: ` + version + `
-Libs: -L$${libdir} -lmstch
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "mstch.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "mstch",
+		description = "libmstch implemented in terms of C++17 variant",
+		version = "v1.0.4",
+		libs = ["-L$${libdir}", "-lmstch"],
+		cflags = ["-I$${includedir}"],
+	)!
+
+	out := os.create(filepath.join(pcDir, "mstch.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("mstch")!
