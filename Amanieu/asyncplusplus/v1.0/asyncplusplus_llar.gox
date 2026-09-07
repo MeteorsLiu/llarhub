@@ -1,8 +1,29 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
 )
+
+const consumerSource = `#include <async++.h>
+#include <iostream>
+
+int main() {
+	auto t1 = async::spawn([] { std::cout << "task1\n"; });
+	auto t2 = async::spawn([]() -> int { return 42; });
+	auto t3 = t2.then([](int v) -> int { return v * 3; });
+	auto t4 = async::when_all(t1, t3);
+	t4.get();
+
+	int r = async::parallel_reduce({1, 2, 3, 4}, 0, [](int x, int y) {
+		return x + y;
+	});
+	if (r != 10) {
+		std::cerr << "unexpected reduce result: " << r << "\n";
+		return 1;
+	}
+	std::cout << "async++ ok: " << r << "\n";
+	return 0;
+}
+`
 
 id "Amanieu/asyncplusplus"
 
@@ -35,8 +56,8 @@ filter => {
 
 onBuild ctx => {
 	installDir := ctx.outputDir
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.buildType "Release"
@@ -52,14 +73,26 @@ onBuild ctx => {
 	c.build
 	c.install
 
-	// No pkg-config file is installed upstream, so derive flags from the
-	// installed interface. Async++ links Threads::Threads PUBLIC, so pthread
-	// follows the library in the static link order.
-	metadata := "-I${filepath.join(installDir, `include`)} -L${filepath.join(installDir, `lib`)} -lasync++ -lpthread"
+	cflags := ["-I$${includedir}"]
 	if !shared {
-		metadata = "-DLIBASYNC_STATIC ${metadata}"
+		cflags <- "-DLIBASYNC_STATIC"
 	}
-	ctx.setMetadata metadata
+
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "async++",
+		description = "Async++ concurrency framework",
+		version = "v1.0",
+		libs = ["-L$${libdir}", "-lasync++", "-lpthread"],
+		cflags = cflags,
+	)!
+	out := os.create(filepath.join(pcDir, "async++.pc"))!
+	pc.writeTo(out)!
+	out.close()!
+
+	pkgconfig.use installDir
+	ctx.setMetadata pkgconfig.lookup("async++")!
 }
 
 onTest ctx => {
@@ -68,46 +101,22 @@ onTest ctx => {
 	// Keep the test build tree independent of the onBuild scratch tree so the
 	// test also works on a cache hit, when onBuild (and its _build dir) does
 	// not run. ctx.SourceDir is a fresh checkout that always exists.
-	testDir := filepath.join(ctx.SourceDir, "_test")
+	testDir := filepath.join(ctx.SourceDir, "_llar_consumer")
 	os.mkdirAll(testDir, 0o755)!
 
-	// Consumer derived from the Conan test_package: include <async++.h> and
-	// exercise the public spawn/then/when_all/parallel_reduce API, then run it.
-	consumerSource := `#include <async++.h>
-#include <iostream>
+	consumer := filepath.join(testDir, "consumer.cpp")
+	os.writeFile(consumer, []byte(consumerSource), 0o644)!
 
-int main() {
-	auto t1 = async::spawn([] { std::cout << "task1\n"; });
-	auto t2 = async::spawn([]() -> int { return 42; });
-	auto t3 = t2.then([](int v) -> int { return v * 3; });
-	auto t4 = async::when_all(t1, t3);
-	t4.get();
+	pkgconfig.use installDir
+	flagsFile := filepath.join(testDir, "async++.flags")
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("async++")!), 0o644)!
 
-	int r = async::parallel_reduce({1, 2, 3, 4}, 0, [](int x, int y) {
-		return x + y;
-	});
-	if (r != 10) {
-		std::cerr << "unexpected reduce result: " << r << "\n";
-		return 1;
-	}
-	std::cout << "async++ ok: " << r << "\n";
-	return 0;
-}
-`
-	src := filepath.join(testDir, "consumer.cpp")
-	os.writeFile(src, []byte(consumerSource), 0o644)!
+	binary := filepath.join(testDir, "consumer")
+	exec! "c++", "-std=c++11", consumer, "-o", binary, "@"+flagsFile
 
-	shared := slices.contains(target.options["shared"], "ON")
-	bin := filepath.join(testDir, "consumer")
-	args := []string{"-std=c++11", "-I", filepath.join(installDir, "include"), "-o", bin, src, "-L", filepath.join(installDir, "lib"), "-lasync++", "-lpthread"}
-	if !shared {
-		args <- "-DLIBASYNC_STATIC"
-	}
-	exec! "g++", args...
-
-	if shared {
+	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	}
-	exec! bin
+	exec! binary
 }
