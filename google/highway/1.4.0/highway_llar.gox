@@ -71,29 +71,62 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	for name in ["libhwy.pc", "libhwy-contrib.pc", "libhwy-test.pc"] {
-		pcPath := filepath.join(installDir, "lib", "pkgconfig", name)
-		if _, err := os.stat(pcPath); err != nil {
-			if os.isNotExist(err) {
-				continue
-			}
-			panic err
+	linux := slices.contains(target.require["os"], "linux")
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+
+	hwyLibs := ["-L$${libdir}", "-lhwy"]
+	if linux {
+		hwyLibs <- "-lm"
+	}
+	hwyCflags := ["-I$${includedir}"]
+	if shared {
+		hwyCflags <- "-DHWY_SHARED_DEFINE"
+	} else {
+		hwyCflags <- "-DHWY_STATIC_DEFINE"
+	}
+	hwy := pkgconfig.new(
+		name = "libhwy",
+		description = "Efficient and performance-portable SIMD wrapper",
+		version = "1.4.0",
+		libs = hwyLibs,
+		cflags = hwyCflags,
+	)!
+	hwyOut := os.create(filepath.join(pcDir, "libhwy.pc"))!
+	hwy.writeTo(hwyOut)!
+	hwyOut.close()!
+
+	contribLibs := ["-L$${libdir}", "-lhwy_contrib"]
+	if linux {
+		contribLibs <- "-lm"
+	}
+	contribCflags := ["-I$${includedir}"]
+	contrib := pkgconfig.new(
+		name = "libhwy-contrib",
+		description = "Additions to Highway: dot product, image, math, sort",
+		version = "1.4.0",
+		libs = contribLibs,
+		cflags = contribCflags,
+	)!
+	contribOut := os.create(filepath.join(pcDir, "libhwy-contrib.pc"))!
+	contrib.writeTo(contribOut)!
+	contribOut.close()!
+
+	if withTest {
+		testLibs := ["-L$${libdir}", "-lhwy_test"]
+		if linux {
+			testLibs <- "-lm"
 		}
-		pc := string(os.readFile(pcPath)!)
-		pc = strings.replace(pc, "prefix="+installDir, "prefix=$${pcfiledir}/../..", 1)
-		pc = strings.replace(pc, "exec_prefix="+installDir, "exec_prefix=$${prefix}", 1)
-		pc = strings.replace(pc, "libdir="+filepath.join(installDir, "lib"), "libdir=$${prefix}/lib", 1)
-		pc = strings.replace(pc, "includedir="+filepath.join(installDir, "include"), "includedir=$${prefix}/include", 1)
-		if slices.contains(target.require["os"], "linux") {
-			lines := pc.split("\n")
-			for i, line in lines {
-				if line.hasPrefix("Libs:") && !strings.contains(line, " -lm") {
-					lines[i] = line + " -lm"
-				}
-			}
-			pc = strings.join(lines, "\n")
-		}
-		os.writeFile(pcPath, []byte(pc), 0o644)!
+		test := pkgconfig.new(
+			name = "libhwy-test",
+			description = "Efficient and performance-portable SIMD wrapper, test helpers.",
+			version = "1.4.0",
+			libs = testLibs,
+			cflags = ["-I$${includedir}"],
+		)!
+		testOut := os.create(filepath.join(pcDir, "libhwy-test.pc"))!
+		test.writeTo(testOut)!
+		testOut.close()!
 	}
 
 	pkgconfig.use installDir
