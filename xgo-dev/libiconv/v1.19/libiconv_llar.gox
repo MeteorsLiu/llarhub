@@ -48,18 +48,16 @@ onBuild ctx => {
 
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: libiconv
-Description: Convert text to and from Unicode
-Version: 1.19
-Libs: -L$${libdir} -liconv -lcharset
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "libiconv.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "libiconv",
+		description = "Convert text to and from Unicode",
+		version = "1.19",
+		libs = ["-L$${libdir}", "-liconv", "-lcharset"],
+		cflags = ["-I$${includedir}"],
+	)!
+	pcFile := os.create(filepath.join(pcDir, "libiconv.pc"))!
+	pc.writeTo(pcFile)!
+	pcFile.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("libiconv")!
