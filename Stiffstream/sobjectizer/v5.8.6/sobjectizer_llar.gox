@@ -88,17 +88,6 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	version := ""
-	for line in string(os.readFile(filepath.join(ctx.SourceDir, "dev", "so_5", "cmake", "target.cmake"))!).split("\n") {
-		if line.hasPrefix("set(SO_5_VERSION ") {
-			version = line.trimPrefix(`set(SO_5_VERSION "`).trimSuffix(`")`)
-			break
-		}
-	}
-	if version == "" {
-		panic "sobjectizer target.cmake has no SO_5_VERSION"
-	}
-
 	libDir := filepath.join(installDir, "lib")
 	libName := ""
 	for entry in os.readDir(libDir)! {
@@ -126,29 +115,27 @@ onBuild ctx => {
 		panic "sobjectizer did not install a library"
 	}
 
-	libs := "-L$${libdir} -l" + libName
+	libs := ["-L$${libdir}", "-l"+libName]
 	if slices.contains(target.require["os"], "linux") || slices.contains(target.require["os"], "freebsd") {
-		libs += " -lpthread -lm"
+		libs = append(libs, "-lpthread", "-lm")
 	}
-	cflags := "-I$${includedir}"
+	cflags := ["-I$${includedir}"]
 	if !shared {
-		cflags += " -DSO_5_STATIC_LIB"
+		cflags = append(cflags, "-DSO_5_STATIC_LIB")
 	}
 
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: sobjectizer
-Description: An actor, publish-subscribe and CSP framework for C++
-Version: ${version}
-Libs: ` + libs + `
-Cflags: ` + cflags + `
-`
-	os.writeFile(filepath.join(pcDir, "sobjectizer.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "sobjectizer",
+		description = "An actor, publish-subscribe and CSP framework for C++",
+		version = "v5.8.6",
+		libs = libs,
+		cflags = cflags,
+	)!
+	out := os.create(filepath.join(pcDir, "sobjectizer.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("sobjectizer")!
