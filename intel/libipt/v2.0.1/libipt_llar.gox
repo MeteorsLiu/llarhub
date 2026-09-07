@@ -1,8 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 )
 
 const consumerSource = `#include <intel-pt.h>
@@ -39,8 +37,8 @@ filter => {
 
 onBuild ctx => {
 	installDir := ctx.outputDir
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
@@ -54,35 +52,18 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	version := map[string]string{}
-	for line in strings.split(string(os.readFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"))!), "\n") {
-		fields := strings.fields(line)
-		if fields.len == 2 {
-			name := strings.trimSuffix(fields[0], "(")
-			value := strings.trimSuffix(fields[1], ")")
-			if name == "set(PT_VERSION_MAJOR" || name == "set(PT_VERSION_MINOR" || name == "set(PT_VERSION_PATCH" {
-				version[name] = value
-			}
-		}
-	}
-
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	major := version["set(PT_VERSION_MAJOR"]
-	minor := version["set(PT_VERSION_MINOR"]
-	patch := version["set(PT_VERSION_PATCH"]
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: libipt
-Description: Intel Processor Trace library
-` + "Version: ${major}.${minor}.${patch}\n" + `
-Libs: -L$${libdir} -lipt
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "libipt.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "libipt",
+		description = "Intel Processor Trace library",
+		version = "v2.0.1",
+		libs = ["-L$${libdir}", "-lipt"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "libipt.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("libipt")!
@@ -98,13 +79,11 @@ onTest ctx => {
 	binary := filepath.join(testDir, "consumer")
 
 	pkgconfig.use installDir
-	args := []string{sourcePath, "-std=c++11"}
-	flags := strings.replaceAll(pkgconfig.lookup("libipt")!, "\\|", "|")
-	args <- strings.fields(flags)...
-	args <- []string{"-o", binary}...
-	exec! "c++", args...
+	flagsFile := filepath.join(testDir, "libipt.flags")
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("libipt")!), 0o644)!
+	exec! "c++", sourcePath, "-std=c++11", "-o", binary, "@"+flagsFile
 
-	if slices.contains(target.options["shared"], "ON") {
+	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	}
