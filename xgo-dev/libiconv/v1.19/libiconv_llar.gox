@@ -32,7 +32,7 @@ onBuild ctx => {
 	exec! autogen
 
 	a := autotools.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
-	a.configure "--disable-shared", "--enable-static", "--enable-pic", "--disable-nls"
+	a.configure "--disable-shared", "--enable-static", "--disable-pic", "--disable-nls"
 	a.build "-j4"
 	a.install
 
