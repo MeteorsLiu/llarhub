@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 )
 
@@ -95,8 +94,8 @@ onBuild ctx => {
 	os.writeFile(filepath.join(sourceDir, "cgltf.c"), []byte("#define CGLTF_IMPLEMENTATION\n#include \"cgltf.h\"\n"), 0o644)!
 	os.writeFile(filepath.join(sourceDir, "cgltf_write.cpp"), []byte("#define CGLTF_WRITE_IMPLEMENTATION\n#include \"cgltf_write.h\"\n"), 0o644)!
 
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.defineBool "BUILD_SHARED_LIBS", shared
 	c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
@@ -108,19 +107,18 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	pkgconfigDir := filepath.join(installDir, "lib", "pkgconfig")
-	os.mkdirAll(pkgconfigDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-includedir=$${prefix}/include
-libdir=$${prefix}/lib
-
-Name: cgltf
-Description: Single-file glTF 2.0 parser and writer
-Version: 1
-Cflags: -I$${includedir}
-Libs: -L$${libdir} -lcgltf
-`
-	os.writeFile(filepath.join(pkgconfigDir, "cgltf.pc"), []byte(pc), 0o644)!
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "cgltf",
+		description = "Single-file glTF 2.0 parser and writer",
+		version = "v1.2",
+		libs = ["-L$${libdir}", "-lcgltf"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "cgltf.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	markerBegin := "/*\n *\n * Stop now, if you are only interested in the API."
 	markerEnd := "/* cgltf is distributed under MIT license:"
@@ -144,20 +142,17 @@ onTest ctx => {
 	testDir := filepath.join(ctx.SourceDir, "_llar_consumer")
 	os.mkdirAll(testDir, 0o755)!
 
-	sourcePath := filepath.join(testDir, "consumer.c")
-	os.writeFile(sourcePath, []byte(consumerSource), 0o644)!
+	consumer := filepath.join(testDir, "consumer.c")
+	os.writeFile(consumer, []byte(consumerSource), 0o644)!
+
+	pkgconfig.use installDir
+	flagsFile := filepath.join(testDir, "cgltf.flags")
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("cgltf")!), 0o644)!
 
 	binary := filepath.join(testDir, "consumer")
-	pkgconfig.use installDir
-	flags := strings.fields(pkgconfig.lookup("cgltf")!)
-	args := []string{
-		sourcePath,
-	}
-	args = append(args, flags...)
-	args = append(args, "-o", binary)
-	exec! "cc", args...
+	cc! consumer, "-o", binary, "@"+flagsFile
 
-	if slices.contains(target.options["shared"], "ON") {
+	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	}
