@@ -1,6 +1,7 @@
 import (
 	"os"
-	"strings"
+	"path/filepath"
+	"slices"
 )
 
 id "json-c/json-c"
@@ -29,17 +30,28 @@ onBuild ctx => {
 	c.build
 	c.install
 
-	// Derive consumer flags from the installed pkg-config file. The static
-	// query also reports json-c's private math dependency (-lm on UNIX),
-	// which a static consumer must link.
-	c.use installDir
-	capout => {
-		exec "pkg-config", "--cflags", "--libs", "--static", "json-c"
+	// Overwrite cmake-installed json-c.pc. This Formula is static-only, so
+	// unix math belongs on public Libs; pkgconfig.lookup does not pass --static.
+	libs := ["-L$${libdir}", "-ljson-c"]
+	if slices.contains(target.require["os"], "linux") {
+		libs <- "-lm"
 	}
-	if lastErr != nil {
-		panic lastErr
-	}
-	ctx.setMetadata strings.trimSpace(output)
+
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "json-c",
+		description = "JSON-C library",
+		version = "json-c-0.17-20230812",
+		libs = libs,
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "json-c.pc"))!
+	pc.writeTo(out)!
+	out.close()!
+
+	pkgconfig.use installDir
+	ctx.setMetadata pkgconfig.lookup("json-c")!
 }
 
 onTest ctx => {
@@ -84,8 +96,5 @@ target_link_libraries(consumer PRIVATE json-c::json-c)
 	tc.configure
 	tc.build
 
-	exec testBuild + "/consumer"
-	if lastErr != nil {
-		panic lastErr
-	}
+	exec! testBuild + "/consumer"
 }
