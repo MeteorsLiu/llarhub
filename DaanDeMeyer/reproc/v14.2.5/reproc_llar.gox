@@ -2,7 +2,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 )
 
 const consumerC = `#include <reproc/reproc.h>
@@ -33,28 +32,6 @@ int main() {
     return result.first;
 }
 `
-
-func rewritePC(pc, installDir string) string {
-	pc = strings.replace(pc, "prefix="+installDir, "prefix=$${pcfiledir}/../..", 1)
-	pc = strings.replace(pc, "exec_prefix="+installDir, "exec_prefix=$${prefix}", 1)
-	pc = strings.replace(pc, "libdir="+filepath.join(installDir, "lib"), "libdir=$${prefix}/lib", 1)
-	pc = strings.replace(pc, "includedir="+filepath.join(installDir, "include"), "includedir=$${prefix}/include", 1)
-	return pc
-}
-
-func withLib(line, flag string) string {
-	if strings.contains(line, " "+flag) || line.hasSuffix(flag) {
-		return line
-	}
-	return line + " " + flag
-}
-
-func libFlag(token string) string {
-	if token == "" || token.hasPrefix("-") {
-		return token
-	}
-	return "-l" + token
-}
 
 id "DaanDeMeyer/reproc"
 
@@ -107,45 +84,42 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	pcNames := ["reproc"]
-	if cxx {
-		pcNames <- "reproc++"
+	reprocLibs := ["-L$${libdir}", "-lreproc"]
+	if linux {
+		reprocLibs <- "-lrt"
+		if multithreaded {
+			reprocLibs <- "-lpthread"
+		}
 	}
-	for name in pcNames {
-		pcPath := filepath.join(installDir, "lib", "pkgconfig", name+".pc")
-		pc := rewritePC(string(os.readFile(pcPath)!), installDir)
-		lines := pc.split("\n")
-		privateLibs := ""
-		for line in lines {
-			if line.hasPrefix("Libs.private:") {
-				privateLibs = line.trimPrefix("Libs.private:").trimSpace()
-			}
-		}
-		for i, line in lines {
-			if !shared && line.hasPrefix("Requires.private:") {
-				line = "Requires:" + line.trimPrefix("Requires.private:")
-			}
-			if line.hasPrefix("Libs:") {
-				if !shared && privateLibs != "" {
-					for token in strings.fields(privateLibs) {
-						line = withLib(line, libFlag(token))
-					}
-				}
-				if name == "reproc" {
-					if linux {
-						line = withLib(line, "-lrt")
-						if multithreaded {
-							line = withLib(line, "-lpthread")
-						}
-					}
-					if windows {
-						line = withLib(line, "-lws2_32")
-					}
-				}
-			}
-			lines[i] = line
-		}
-		os.writeFile(pcPath, []byte(strings.join(lines, "\n")), 0o644)!
+	if windows {
+		reprocLibs <- "-lws2_32"
+	}
+
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	reprocPC := pkgconfig.new(
+		name = "reproc",
+		description = "reproc C library",
+		version = "v14.2.5",
+		libs = reprocLibs,
+		cflags = ["-I$${includedir}"],
+	)!
+	reprocOut := os.create(filepath.join(pcDir, "reproc.pc"))!
+	reprocPC.writeTo(reprocOut)!
+	reprocOut.close()!
+
+	if cxx {
+		cxxPC := pkgconfig.new(
+			name = "reproc++",
+			description = "reproc C++ library",
+			version = "v14.2.5",
+			requires = ["reproc"],
+			libs = ["-L$${libdir}", "-lreproc++"],
+			cflags = ["-I$${includedir}"],
+		)!
+		cxxOut := os.create(filepath.join(pcDir, "reproc++.pc"))!
+		cxxPC.writeTo(cxxOut)!
+		cxxOut.close()!
 	}
 
 	pkgconfig.use installDir
