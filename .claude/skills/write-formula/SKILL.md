@@ -102,7 +102,12 @@ LLAR's configured streams, working directory, and execution path.
   real consumer.
 - For C/C++ library metadata exposed through pkg-config, install a verified,
   relocatable `.pc` file and set metadata from the complete pkg-config
-  cflags-and-libs lookup. Do not substitute a handwritten `-I`, `-L`, or `-l`
+  cflags-and-libs lookup. Prefer a valid upstream-installed file. When the
+  Formula must create the file and the resolved LLAR revision provides
+  `pkgconfig.new`, use that writer; do not hand-assemble `prefix`,
+  `exec_prefix`, `libdir`, `includedir`, or the property layout. The Formula
+  still chooses the output path, filename, writer lifetime, and the final
+  `pkgconfig.lookup`. Do not substitute a handwritten `-I`, `-L`, or `-l`
   fragment, or a libs-only query, for the complete result.
 - Keep consumer tests independent of the build scratch tree so they can run on
   a cache hit.
@@ -125,9 +130,12 @@ LLAR's configured streams, working directory, and execution path.
   APIs to decide Formula behavior. Read the selected platform from
   `target.require["os"]` and `target.require["arch"]`. Do not fall back to
   the host when those keys are empty; missing require is a matrix failure.
-- When the resolved LLAR revision exposes `target.version`, that is the
-  original version or ref selected for this build. Use it when the Formula
-  must know the selected tag. Do not confuse it with `fromVer`.
+- A Formula is one reusable build script for every version in its `fromVer`
+  range. Do not read, compare, or branch on the exact requested version or
+  VCS ref. `fromVer` selects the script; the requested version selects the
+  source checkout. If the procedure cannot cover the range without that
+  string, add another Formula threshold. Do not use `target.version` even
+  when an older LLAR revision exposed it.
 - Do not add compatibility paths, fallback behavior, flags, generators,
   options, abstractions, or helpers without evidence that the current Formula
   needs them.
