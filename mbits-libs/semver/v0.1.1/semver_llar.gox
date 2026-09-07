@@ -2,7 +2,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 )
 
 const consumerSource = `#include <cstdio>
@@ -74,32 +73,19 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	version := ""
-	for line in strings.split(string(os.readFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"))!), "\n") {
-		fields := strings.fields(line)
-		if fields.len >= 2 && fields[0] == "VERSION" {
-			version = fields[1]
-			break
-		}
-	}
-	if version == "" {
-		panic "semver CMakeLists.txt has no project version"
-	}
-
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
 
-Name: semver
-Description: Semantic Version type for C++17
-Version: ${version}
-Libs: -L$${libdir} -lsemver
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "semver.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "semver",
+		description = "Semantic Version type for C++17",
+		version = "v0.1.1",
+		libs = ["-L$${libdir}", "-lsemver"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "semver.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("semver")!
