@@ -66,23 +66,29 @@ onBuild ctx => {
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
 	linux := slices.contains(target.require["os"], "linux")
-	for name in ["libkvspic", "libkvspicClient", "libkvspicState", "libkvspicUtils"] {
-		pcPath := filepath.join(installDir, "lib", "pkgconfig", name+".pc")
-		pc := string(os.readFile(pcPath)!)
-		pc = strings.replace(pc, "prefix="+installDir, "prefix=$${pcfiledir}/../..", 1)
-		pc = strings.replace(pc, "exec_prefix="+installDir, "exec_prefix=$${prefix}", 1)
-		pc = strings.replace(pc, "libdir="+filepath.join(installDir, "lib"), "libdir=$${prefix}/lib", 1)
-		pc = strings.replace(pc, "includedir="+filepath.join(installDir, "include"), "includedir=$${prefix}/include", 1)
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pcs := {
+		"libkvspic": "KVS PIC library",
+		"libkvspicClient": "KVS PIC client only library",
+		"libkvspicState": "KVS PIC state only library",
+		"libkvspicUtils": "KVS PIC utils only library",
+	}
+	for name, description in pcs {
+		libs := ["-L$${libdir}", "-l"+name.trimPrefix("lib")]
 		if linux && (name == "libkvspic" || name == "libkvspicUtils") {
-			lines := pc.split("\n")
-			for i, line in lines {
-				if line.hasPrefix("Libs:") && !strings.contains(line, " -ldl") {
-					lines[i] = line + " -ldl -lrt -lpthread"
-				}
-			}
-			pc = strings.join(lines, "\n")
+			libs <- ["-ldl", "-lrt", "-lpthread"]...
 		}
-		os.writeFile(pcPath, []byte(pc), 0o644)!
+		pc := pkgconfig.new(
+			name = name,
+			description = description,
+			version = "v1.1.0",
+			libs = libs,
+			cflags = ["-I$${includedir}"],
+		)!
+		out := os.create(filepath.join(pcDir, name+".pc"))!
+		pc.writeTo(out)!
+		out.close()!
 	}
 
 	pkgconfig.use installDir
