@@ -1,8 +1,6 @@
 import (
-	"path/filepath"
 	"os"
-	"slices"
-	"strings"
+	"path/filepath"
 )
 
 const consumerProgram = `#include <cglm/cglm.h>
@@ -38,9 +36,9 @@ fromVer "v0.7.2"
 // `cglm` library installed under `lib`, and headers under `include/cglm`) is
 // stable from v0.7.2 — the first tag with a CMakeLists — onward.
 //
-// A `cglm.pc` pkg-config file is only installed from v0.8.2; v0.7.2..v0.8.1
-// ship the same build and install layout but no `.pc`, so the metadata step
-// falls back to hand-built flags for that range.
+// The Formula always publishes relocatable `cglm.pc` via pkgconfig.new so the
+// same metadata contract covers v0.7.2..v0.8.1 (no upstream pc) and later tags
+// that install one. Version is the fromVer floor, not the selected tag.
 //
 // Options mirror the meaningful choices of the Conan Center recipe:
 //   - shared: build the shared library (ON) instead of the static one (OFF).
@@ -61,7 +59,7 @@ filter => {
 
 onBuild ctx => {
 	installDir := ctx.outputDir
-	shared := slices.contains(target.options["shared"], "ON")
+	shared := target.options["shared"][0] == "ON"
 
 	c := cmake.new(ctx.SourceDir, ctx.SourceDir+"/_build", installDir)
 	c.defineBool "CGLM_SHARED", shared
@@ -71,63 +69,43 @@ onBuild ctx => {
 	c.build
 	c.install
 
-	// Prefer the installed pkg-config file so metadata stays synchronized with
-	// the actual build (e.g. -lm on Linux/FreeBSD). v0.8.2+ install `cglm.pc`;
-	// v0.7.2..v0.8.1 do not, so fall back to hand-built flags derived from the
-	// install layout when pkg-config cannot resolve cglm.
-	c.use installDir
-	capout => {
-		exec "pkg-config", "--cflags", "--libs", "cglm"
-	}
-	if lastErr == nil {
-		ctx.setMetadata strings.trimSpace(output)
-		return
-	}
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "cglm",
+		description = "Highly optimized 3D math library",
+		version = "v0.7.2",
+		libs = ["-L$${libdir}", "-lcglm", "-lm"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "cglm.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
-	// No usable `cglm.pc`: the CMake install still produces libcglm under
-	// <installDir>/lib and headers under <installDir>/include, matching the
-	// consumer flags the test uses.
-	flags := []string{
-		"-I" + filepath.join(installDir, "include"),
-		"-L" + filepath.join(installDir, "lib"),
-		"-lcglm", "-lm",
-	}
-	ctx.setMetadata strings.join(flags, " ")
+	pkgconfig.use installDir
+	ctx.setMetadata pkgconfig.lookup("cglm")!
 }
 
 onTest ctx => {
 	installDir := ctx.outputDir
 	testBuild := ctx.SourceDir + "/_consumer_build"
-	if err := os.mkdirAll(testBuild, 0o755); err != nil {
-		panic err
-	}
+	os.mkdirAll(testBuild, 0o755)!
 
 	// Consumer program mirrors the Conan test_package: include <cglm/cglm.h>,
 	// compute a determinant and a matrix-vector product.
 	testSource := filepath.join(testBuild, "consumer.c")
-	if err := os.writeFile(testSource, []byte(consumerProgram), 0o644); err != nil {
-		panic err
-	}
+	os.writeFile(testSource, []byte(consumerProgram), 0o644)!
 
-	// Derive consumer flags from the installed output, not from ctx.Out
-	// metadata: on a cache hit onBuild is skipped and the build result is
-	// empty, but the install directory is still populated.
-	flags := []string{
-		"-I" + filepath.join(installDir, "include"),
-		"-L" + filepath.join(installDir, "lib"),
-		"-lcglm", "-lm",
-	}
+	pkgconfig.use installDir
+	flagsFile := filepath.join(testBuild, "cglm.flags")
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("cglm")!), 0o644)!
 
 	binary := filepath.join(testBuild, "consumer")
-	args := []string{testSource, "-o", binary}
-	args = append(args, flags...)
-	exec "cc", args...
-	if lastErr != nil {
-		panic lastErr
-	}
+	cc! testSource, "-o", binary, "@"+flagsFile
 
-	exec binary
-	if lastErr != nil {
-		panic lastErr
+	if target.options["shared"][0] == "ON" {
+		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
+		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	}
+	exec! binary
 }
