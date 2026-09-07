@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 const consumerSource = `#include <args/parser.hpp>
@@ -39,16 +38,6 @@ int main(int argc, char* argv[]) {
 }
 `
 
-const consumerCMakeLists = `cmake_minimum_required(VERSION 3.12)
-project(args_consumer LANGUAGES CXX)
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-add_executable(args_consumer consumer.cpp)
-target_include_directories(args_consumer PRIVATE "INSTALL_DIR/include")
-target_link_directories(args_consumer PRIVATE "INSTALL_DIR/lib")
-target_link_libraries(args_consumer PRIVATE args)
-`
-
 var sourcePatch = `diff --git a/CMakeLists.txt b/CMakeLists.txt
 index 3d9271c..28c176f 100644
 --- a/CMakeLists.txt
@@ -68,9 +57,8 @@ onBuild ctx => {
 	_, err := os.stat(filepath.join(ctx.SourceDir, "conanfile.txt"))
 	if err == nil {
 		patchFile := filepath.join(ctx.SourceDir, "_llar.patch")
-		os.writeFile(patchFile, []byte(sourcePatch), 0644)!
-		git "apply", "--unidiff-zero", patchFile
-		lastErr!
+		os.writeFile(patchFile, []byte(sourcePatch), 0o644)!
+		git! "apply", "--unidiff-zero", patchFile
 	} else if !os.isNotExist(err) {
 		panic err
 	}
@@ -82,27 +70,36 @@ onBuild ctx => {
 	c.build
 	c.install
 
-	flags := []string{
-		"-I" + filepath.join(installDir, "include"),
-		"-L" + filepath.join(installDir, "lib"),
-		"-largs",
-	}
-	ctx.setMetadata strings.join(flags, " ")
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "args",
+		description = "mbits args parser",
+		version = "v0.10.0",
+		libs = ["-L$${libdir}", "-largs"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "args.pc"))!
+	pc.writeTo(out)!
+	out.close()!
+
+	pkgconfig.use installDir
+	ctx.setMetadata pkgconfig.lookup("args")!
 }
 
 onTest ctx => {
 	installDir := ctx.outputDir
 	testDir := filepath.join(ctx.SourceDir, "_llar_consumer")
-	testBuild := filepath.join(testDir, "_build")
+	os.mkdirAll(testDir, 0o755)!
 
-	os.mkdirAll(testDir, 0755)!
-	os.writeFile(filepath.join(testDir, "consumer.cpp"), []byte(consumerSource), 0644)!
-	os.writeFile(filepath.join(testDir, "CMakeLists.txt"), []byte(strings.replace(consumerCMakeLists, "INSTALL_DIR", installDir, -1)), 0644)!
+	consumer := filepath.join(testDir, "consumer.cpp")
+	os.writeFile(consumer, []byte(consumerSource), 0o644)!
 
-	tc := cmake.new(testDir, testBuild, "")
-	tc.configure
-	tc.build
+	pkgconfig.use installDir
+	flagsFile := filepath.join(testDir, "args.flags")
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("args")!), 0o644)!
 
-	exec filepath.join(testBuild, "args_consumer"), "--sum", "1", "2", "3"
-	lastErr!
+	binary := filepath.join(testDir, "consumer")
+	exec! "c++", "-std=c++17", consumer, "-o", binary, "@"+flagsFile
+	exec! binary, "--sum", "1", "2", "3"
 }
