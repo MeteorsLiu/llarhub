@@ -14,12 +14,26 @@ const consumerSource = `#include "MiniScript/SimpleString.h"
 
 #include <iostream>
 
+static void PrintOut(MiniScript::String s, bool lineBreak) {
+	std::cout << s.c_str();
+	if (lineBreak) {
+		std::cout << std::endl;
+	}
+}
+
+static void PrintErr(MiniScript::String s, bool lineBreak) {
+	std::cerr << s.c_str();
+	if (lineBreak) {
+		std::cerr << std::endl;
+	}
+}
+
 int main() {
 	MiniScript::Interpreter interp;
 
-	interp.standardOutput = [](MiniScript::String s) { std::cout << s.c_str() << std::endl; };
-	interp.errorOutput = [](MiniScript::String s) { std::cerr << s.c_str() << std::endl; };
-	interp.implicitOutput = [](MiniScript::String s) { std::cout << s.c_str() << std::endl; };
+	interp.standardOutput = &PrintOut;
+	interp.errorOutput = &PrintErr;
+	interp.implicitOutput = &PrintOut;
 
 	interp.REPL("x = 5");
 	interp.REPL("print \"x = \" + x");
@@ -82,24 +96,23 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	libs := "-L$${libdir} -lminiscript-cpp"
+	libs := ["-L$${libdir}", "-lminiscript-cpp"]
 	if slices.contains(target.require["os"], "linux") || slices.contains(target.require["os"], "freebsd") {
-		libs += " -lm -lpthread"
+		libs <- "-lm"
+		libs <- "-lpthread"
 	}
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: miniscript
-Description: MiniScript embedded scripting language
-Version: 1.6.2
-Libs: ` + libs + `
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "miniscript.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "miniscript",
+		description = "MiniScript embedded scripting language",
+		version = "v1.6.2",
+		libs = libs,
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "miniscript.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("miniscript")!
