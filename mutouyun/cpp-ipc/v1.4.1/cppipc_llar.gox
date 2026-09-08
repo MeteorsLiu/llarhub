@@ -155,6 +155,7 @@ static inline int sem_timedwait(sem_t *sem, const struct timespec *abs_timeout) 
 	}
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
+	c.buildType "Release"
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
 	c.define "CMAKE_POLICY_VERSION_MINIMUM", "3.5"
 	c.defineBool "LIBIPC_BUILD_SHARED_LIBS", shared
@@ -170,10 +171,13 @@ static inline int sem_timedwait(sem_t *sem, const struct timespec *abs_timeout) 
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
 	libs := ["-L$${libdir}", "-lipc"]
-	if target.require["os"][0] == "linux" {
+	osName := target.require["os"][0]
+	if osName == "linux" {
 		libs <- "-lrt"
 		libs <- "-lpthread"
 		libs <- "-lm"
+	} else if osName == "darwin" {
+		libs <- "-lpthread"
 	}
 
 	cflags := ["-I$${includedir}"]
