@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
 )
 
 const consumerSource = `#include <poly2tri/poly2tri.h>
@@ -45,8 +44,8 @@ onBuild ctx => {
 	cmakeLists := ctx.Proj.readFile("88de49021b6d9bef6faa1bc94ceb3fbd85c3c204/CMakeLists.txt")!
 	os.writeFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"), cmakeLists, 0o644)!
 
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "POLY2TRI_SRC_DIR", filepath.join(ctx.SourceDir, "poly2tri")
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
@@ -60,24 +59,22 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
+	libs := ["-L$${libdir}", "-lpoly2tri"]
+	if target.require["os"][0] == "linux" || target.require["os"][0] == "freebsd" {
+		libs <- "-lm"
+	}
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: poly2tri
-Description: 2D constrained Delaunay triangulation library
-Version: 88de49021b6d9bef6faa1bc94ceb3fbd85c3c204
-Libs: -L$${libdir} -lpoly2tri`
-	if slices.contains(target.require["os"], "linux") || slices.contains(target.require["os"], "freebsd") {
-		pc += " -lm"
-	}
-	pc += `
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "poly2tri.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "poly2tri",
+		description = "2D constrained Delaunay triangulation library",
+		version = "88de49021b6d9bef6faa1bc94ceb3fbd85c3c204",
+		libs = libs,
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "poly2tri.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("poly2tri")!
@@ -94,15 +91,11 @@ onTest ctx => {
 	os.writeFile(sourcePath, []byte(consumerSource), 0o644)!
 
 	pkgconfig.use installDir
-	args := []string{"-std=c++11", sourcePath}
-	// pkg-config escapes the `|` in LLAR option-cache paths; restore it before
-	// passing each complete lookup token to the compiler.
-	flags := pkgconfig.lookup("poly2tri")!
-	args <- flags.replaceAll(`\|`, `|`).fields...
-	args <- "-o", binary
-	exec! "c++", args...
+	flagsFile := filepath.join(testDir, "poly2tri.flags")
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("poly2tri")!), 0o644)!
+	exec! "c++", "-std=c++11", sourcePath, "-o", binary, "@"+flagsFile
 
-	if slices.contains(target.options["shared"], "ON") {
+	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	}
