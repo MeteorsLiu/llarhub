@@ -1,9 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"runtime"
-	"slices"
-	"strings"
 )
 
 id "mackron/miniaudio"
@@ -34,28 +31,10 @@ filter => {
 
 onBuild ctx => {
 	installDir := ctx.outputDir
-	headerOnly := slices.contains(target.options["header_only"], "ON")
-	shared := slices.contains(target.options["shared"], "ON") && !headerOnly
-	fPIC := slices.contains(target.options["fPIC"], "ON")
-
-	header := string(os.readFile(filepath.join(ctx.SourceDir, "miniaudio.h"))!)
-	versionParts := map[string]string{}
-	for line in strings.split(header, "\n") {
-		fields := strings.fields(line)
-		if fields.len == 3 && fields[0] == "#define" {
-			versionParts[fields[1]] = fields[2]
-		}
-	}
-	version := strings.join([]string{
-		versionParts["MA_VERSION_MAJOR"],
-		versionParts["MA_VERSION_MINOR"],
-		versionParts["MA_VERSION_REVISION"],
-	}, ".")
-	osName := runtime.GOOS
-	osValues := target.require["os"]
-	if osValues.len > 0 {
-		osName = osValues[0]
-	}
+	headerOnly := target.options["header_only"][0] == "ON"
+	shared := target.options["shared"][0] == "ON" && !headerOnly
+	fPIC := target.options["fPIC"][0] == "ON"
+	osName := target.require["os"][0]
 
 	includeDir := filepath.join(installDir, "include")
 	os.mkdirAll(includeDir, 0o755)!
@@ -68,7 +47,8 @@ onBuild ctx => {
 
 		c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 		c.define "MINIAUDIO_SRC_DIR", ctx.SourceDir
-		c.define "MINIAUDIO_VERSION_STRING", version
+		c.define "MINIAUDIO_VERSION_STRING", "8bf157f10e278302f8a6c1c9cd1065f2bea26dd2"
+		c.define "CMAKE_INSTALL_LIBDIR", "lib"
 		c.defineBool "BUILD_SHARED_LIBS", shared
 		c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
 		c.configure
@@ -84,40 +64,38 @@ onBuild ctx => {
 	license := os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), license, 0o644)!
 
-	libs := ""
+	libs := []string{}
 	if !headerOnly {
-		libs = "-L$${libdir} -lminiaudio"
+		libs <- "-L$${libdir}", "-lminiaudio"
 	}
 	if osName == "linux" {
-		libs += " -lm -lpthread -ldl"
+		libs <- "-lm", "-lpthread", "-ldl"
 	} else if osName == "freebsd" {
-		libs += " -lm -lpthread"
+		libs <- "-lm", "-lpthread"
 	} else if osName == "darwin" {
-		libs += " -framework CoreFoundation -framework CoreAudio -framework AudioUnit"
+		libs <- "-framework", "CoreFoundation", "-framework", "CoreAudio", "-framework", "AudioUnit"
 	}
 
-	cflags := "-I$${includedir}"
+	cflags := ["-I$${includedir}"]
 	if shared {
-		cflags += " -DMA_DLL"
+		cflags <- "-DMA_DLL"
 	}
 	if osName == "darwin" {
-		cflags += " -DMA_NO_RUNTIME_LINKING=1"
+		cflags <- "-DMA_NO_RUNTIME_LINKING=1"
 	}
 
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: miniaudio
-Description: A single file audio playback and capture library.
-Version: ` + version + `
-Libs: ` + libs + `
-Cflags: ` + cflags + `
-`
-	os.writeFile(filepath.join(pcDir, "miniaudio.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "miniaudio",
+		description = "A single file audio playback and capture library.",
+		version = "8bf157f10e278302f8a6c1c9cd1065f2bea26dd2",
+		libs = libs,
+		cflags = cflags,
+	)!
+	out := os.create(filepath.join(pcDir, "miniaudio.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("miniaudio")!
@@ -163,9 +141,8 @@ int main(void) {
 `), 0o644)!
 
 	pkgconfig.use installDir
-	flags := pkgconfig.lookup("miniaudio")!
 	flagsFile := filepath.join(testDir, "miniaudio.flags")
-	os.writeFile(flagsFile, []byte(flags), 0o644)!
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("miniaudio")!), 0o644)!
 
 	binary := filepath.join(testDir, "consumer")
 	cc! "-std=c99", consumer, "-o", binary, "@"+flagsFile
