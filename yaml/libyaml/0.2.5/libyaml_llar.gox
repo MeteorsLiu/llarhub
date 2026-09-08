@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
 )
 
 const consumerSource = `#include <yaml.h>
@@ -131,8 +130,8 @@ filter => {
 
 onBuild ctx => {
 	installDir := ctx.outputDir
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "INSTALL_CMAKE_DIR", "lib/cmake/libyaml"
@@ -151,21 +150,18 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "License"), os.readFile(filepath.join(ctx.SourceDir, "License"))!, 0o644)!
 
-	// Upstream CMake does not install pkg-config metadata.
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: yaml
-Description: LibYAML is a YAML parser and emitter library
-Version: 0.2.5
-Libs: -L$${libdir} -lyaml
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "yaml.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "yaml",
+		description = "LibYAML is a YAML parser and emitter library",
+		version = "0.2.5",
+		libs = ["-L$${libdir}", "-lyaml"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "yaml.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("yaml")!
@@ -183,9 +179,9 @@ onTest ctx => {
 	pkgconfig.use installDir
 	flagsFile := filepath.join(testDir, "yaml.flags")
 	os.writeFile(flagsFile, []byte(pkgconfig.lookup("yaml")!), 0o644)!
-	cc! consumer, "@${flagsFile}", "-o", binary
+	cc! consumer, "@"+flagsFile, "-o", binary
 
-	if slices.contains(target.options["shared"], "ON") {
+	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	}
