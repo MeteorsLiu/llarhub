@@ -70,7 +70,8 @@ onBuild ctx => {
 	if !shared {
 		osName := target.require["os"][0]
 		if osName == "linux" || osName == "freebsd" {
-			libs <- ["-lpthread", "-lanl", "-lrt", "-lnsl"]...
+			// glibc on Ubuntu 24.04 no longer ships libnsl.so.1 by default.
+			libs <- ["-lpthread", "-lanl", "-lrt"]...
 		}
 		cflags <- "-DNN_STATIC_LIB"
 	}
