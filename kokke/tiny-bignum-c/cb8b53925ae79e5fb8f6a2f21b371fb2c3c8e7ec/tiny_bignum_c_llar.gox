@@ -1,23 +1,7 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
 )
-
-const cmakeLists = `cmake_minimum_required(VERSION 3.15)
-project(tiny-bignum-c LANGUAGES C)
-
-add_library(tiny-bignum-c $${TINY_BIGNUM_C_SRC_DIR}/bn.c)
-set_target_properties(tiny-bignum-c PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
-
-include(GNUInstallDirs)
-install(TARGETS tiny-bignum-c
-        RUNTIME DESTINATION $${CMAKE_INSTALL_BINDIR}
-        LIBRARY DESTINATION $${CMAKE_INSTALL_LIBDIR}
-        ARCHIVE DESTINATION $${CMAKE_INSTALL_LIBDIR})
-
-install(FILES $${TINY_BIGNUM_C_SRC_DIR}/bn.h DESTINATION $${CMAKE_INSTALL_INCLUDEDIR})
-`
 
 const consumerSource = `#include <bn.h>
 
@@ -77,14 +61,29 @@ filter => {
 
 onBuild ctx => {
 	installDir := ctx.outputDir
+	cmakeLists := `cmake_minimum_required(VERSION 3.15)
+project(tiny-bignum-c LANGUAGES C)
+
+add_library(tiny-bignum-c $${TINY_BIGNUM_C_SRC_DIR}/bn.c)
+set_target_properties(tiny-bignum-c PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
+
+include(GNUInstallDirs)
+install(TARGETS tiny-bignum-c
+        RUNTIME DESTINATION $${CMAKE_INSTALL_BINDIR}
+        LIBRARY DESTINATION $${CMAKE_INSTALL_LIBDIR}
+        ARCHIVE DESTINATION $${CMAKE_INSTALL_LIBDIR})
+
+install(FILES $${TINY_BIGNUM_C_SRC_DIR}/bn.h DESTINATION $${CMAKE_INSTALL_INCLUDEDIR})
+`
 	cmakeDir := filepath.join(ctx.SourceDir, "_llar_cmake")
 	os.mkdirAll(cmakeDir, 0o755)!
 	os.writeFile(filepath.join(cmakeDir, "CMakeLists.txt"), []byte(cmakeLists), 0o644)!
 
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
 	c := cmake.new(cmakeDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "TINY_BIGNUM_C_SRC_DIR", ctx.SourceDir
+	c.define "CMAKE_INSTALL_LIBDIR", "lib"
 	c.defineBool "BUILD_SHARED_LIBS", shared
 	if !shared {
 		c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
@@ -97,19 +96,18 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	pkgconfigDir := filepath.join(installDir, "lib", "pkgconfig")
-	os.mkdirAll(pkgconfigDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-includedir=$${prefix}/include
-libdir=$${prefix}/lib
-
-Name: tiny-bignum-c
-Description: Small multiple-precision integer implementation in C
-Version: cb8b53925ae79e5fb8f6a2f21b371fb2c3c8e7ec
-Cflags: -I$${includedir}
-Libs: -L$${libdir} -ltiny-bignum-c
-`
-	os.writeFile(filepath.join(pkgconfigDir, "tiny-bignum-c.pc"), []byte(pc), 0o644)!
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "tiny-bignum-c",
+		description = "Small multiple-precision integer implementation in C",
+		version = "cb8b53925ae79e5fb8f6a2f21b371fb2c3c8e7ec",
+		libs = ["-L$${libdir}", "-ltiny-bignum-c"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "tiny-bignum-c.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("tiny-bignum-c")!
@@ -123,15 +121,14 @@ onTest ctx => {
 	consumer := filepath.join(testDir, "consumer.c")
 	os.writeFile(consumer, []byte(consumerSource), 0o644)!
 
-	shared := slices.contains(target.options["shared"], "ON")
 	binary := filepath.join(testDir, "consumer")
 
 	pkgconfig.use installDir
 	flagsFile := filepath.join(testDir, "tiny-bignum-c.flags")
 	os.writeFile(flagsFile, []byte(pkgconfig.lookup("tiny-bignum-c")!), 0o644)!
-	cc! consumer, "-o", binary, "@" + flagsFile
+	cc! consumer, "-o", binary, "@"+flagsFile
 
-	if shared {
+	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	}
