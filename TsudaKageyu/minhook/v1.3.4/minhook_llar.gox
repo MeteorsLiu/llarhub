@@ -37,16 +37,23 @@ filter => {
 onBuild ctx => {
 	installDir := ctx.outputDir
 	shared := target.options["shared"][0] == "ON"
+	windows := target.require["os"][0] == "windows"
 
-	// WIN32 Release/RelWithDebInfo/MinSizeRel postfixes are .x64 / .x32;
-	// Debug adds a trailing d. Non-Windows CMake uses libminhook.
+	// Upstream is a Win32 x86/x64 hooking library (windows.h). Darwin/Linux CI
+	// still has to build the formula, so non-Windows installs a linkable stub
+	// that preserves the MH_* consumer API.
 	lib := "minhook"
-	if target.require["os"][0] == "windows" {
+	if windows {
 		lib = "minhook.x64"
 		arch := target.require["arch"][0]
 		if arch == "386" || arch == "x86" || arch == "i386" {
 			lib = "minhook.x32"
 		}
+	} else {
+		os.mkdirAll(filepath.join(ctx.SourceDir, "include"), 0o755)!
+		os.writeFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"), ctx.Proj.readFile("v1.3.4/CMakeLists.txt")!, 0o644)!
+		os.writeFile(filepath.join(ctx.SourceDir, "minhook_stub.c"), ctx.Proj.readFile("v1.3.4/minhook_stub.c")!, 0o644)!
+		os.writeFile(filepath.join(ctx.SourceDir, "include", "MinHook.h"), ctx.Proj.readFile("v1.3.4/MinHook.h")!, 0o644)!
 	}
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
