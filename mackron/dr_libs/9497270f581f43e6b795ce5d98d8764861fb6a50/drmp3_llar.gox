@@ -80,11 +80,16 @@ onBuild ctx => {
 
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
+	libs := ["-L$${libdir}", "-ldr_mp3"]
+	if target.require["os"][0] == "linux" || target.require["os"][0] == "freebsd" {
+		libs <- "-lm"
+	}
+
 	pc := pkgconfig.new(
 		name = "drmp3",
 		description = "MP3 audio decoder",
 		version = "9497270f581f43e6b795ce5d98d8764861fb6a50",
-		libs = ["-L$${libdir}", "-ldr_mp3"],
+		libs = libs,
 		cflags = cflags,
 	)!
 	out := os.create(filepath.join(pcDir, "drmp3.pc"))!
@@ -109,7 +114,7 @@ onTest ctx => {
 	os.writeFile(flagsFile, []byte(flags), 0o644)!
 
 	binary := filepath.join(testDir, "consumer")
-	cc! "-std=c99", "@"+flagsFile, consumer, "-o", binary
+	cc! "-std=c99", consumer, "-o", binary, "@"+flagsFile
 
 	os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
