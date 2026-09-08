@@ -1,8 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 )
 
 const consumerSource = `#include <nanomsg/nn.h>
@@ -67,53 +65,29 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "COPYING"), os.readFile(filepath.join(ctx.SourceDir, "COPYING"))!, 0o644)!
 
-	// CMake installs nanomsg.pc with CMAKE_INSTALL_PREFIX baked in and
-	// runtime libraries only in Libs.private. Keep those flags, make the
-	// file relocatable, and complete the static C consumer metadata.
-	pcPath := filepath.join(installDir, "lib", "pkgconfig", "nanomsg.pc")
-	pc := string(os.readFile(pcPath)!)
-	pc = strings.replace(pc, "prefix="+installDir, "prefix=$${pcfiledir}/../..", 1)
-	pc = strings.replace(pc, "libdir="+filepath.join(installDir, "lib"), "libdir=$${prefix}/lib", 1)
-	pc = strings.replace(pc, "includedir="+filepath.join(installDir, "include"), "includedir=$${prefix}/include", 1)
-
-	osName := ""
-	osValues := target.require["os"]
-	if osValues.len > 0 {
-		osName = osValues[0]
+	libs := ["-L$${libdir}", "-lnanomsg"]
+	cflags := ["-I$${includedir}"]
+	if !shared {
+		osName := target.require["os"][0]
+		if osName == "linux" || osName == "freebsd" {
+			// glibc on Ubuntu 24.04 no longer ships libnsl.so.1 by default.
+			libs <- ["-lpthread", "-lanl", "-lrt"]...
+		}
+		cflags <- "-DNN_STATIC_LIB"
 	}
 
-	lines := pc.split("\n")
-	privateLibs := ""
-	for line in lines {
-		if line.hasPrefix("Libs.private:") {
-			privateLibs = line.trimPrefix("Libs.private:").trimSpace()
-		}
-	}
-
-	requiredPrivate := []string{}
-	if osName == "linux" || osName == "freebsd" {
-		requiredPrivate = ["-lpthread", "-lanl", "-lrt", "-lnsl"]
-	}
-	for lib in requiredPrivate {
-		if privateLibs == "" {
-			privateLibs = lib
-		} else if !strings.contains(privateLibs, lib) {
-			privateLibs += " " + lib
-		}
-	}
-
-	for i, line in lines {
-		if line.hasPrefix("Libs.private:") && privateLibs != "" {
-			lines[i] = "Libs.private: " + privateLibs
-		}
-		if !shared && privateLibs != "" && line.hasPrefix("Libs:") && !strings.contains(line, privateLibs) {
-			lines[i] = line + " " + privateLibs
-		}
-		if !shared && line.hasPrefix("Cflags:") && !strings.contains(line, "-DNN_STATIC_LIB") {
-			lines[i] = line + " -DNN_STATIC_LIB"
-		}
-	}
-	os.writeFile(pcPath, []byte(strings.join(lines, "\n")), 0o644)!
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "nanomsg",
+		description = "nanomsg",
+		version = "1.2.4",
+		libs = libs,
+		cflags = cflags,
+	)!
+	out := os.create(filepath.join(pcDir, "nanomsg.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("nanomsg")!
