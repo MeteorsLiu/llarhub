@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 )
 
@@ -34,11 +33,6 @@ filter => {
 			}
 		}
 	}
-	for value in target.require["os"] {
-		if value != "linux" && value != "freebsd" {
-			return false
-		}
-	}
 	return true
 }
 
@@ -48,8 +42,15 @@ onBuild ctx => {
 	cmakeLists := ctx.Proj.readFile("3162cf8faff04e26a8daa846618b90326f71b9d5/CMakeLists.txt")!
 	os.writeFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"), cmakeLists, 0o644)!
 
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	if target.require["os"][0] == "darwin" {
+		headerPath := filepath.join(ctx.SourceDir, "include", "rawmidi.h")
+		header := string(os.readFile(headerPath)!)
+		header = strings.replace(header, "#include <endian.h>", "#include <machine/endian.h>", 1)
+		os.writeFile(headerPath, []byte(header), 0o644)!
+	}
+
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "TINYMIDI_SRC_DIR", ctx.SourceDir
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
@@ -65,17 +66,16 @@ onBuild ctx => {
 
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-includedir=$${prefix}/include
-libdir=$${prefix}/lib
-
-Name: tinymidi
-Description: A small C library for doing MIDI on GNU/Linux
-Version: 3162cf8faff04e26a8daa846618b90326f71b9d5
-Libs: -L$${libdir} -ltinymidi
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "tinymidi.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "tinymidi",
+		description = "A small C library for doing MIDI on GNU/Linux",
+		version = "3162cf8faff04e26a8daa846618b90326f71b9d5",
+		libs = ["-L$${libdir}", "-ltinymidi"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "tinymidi.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("tinymidi")!
@@ -83,21 +83,21 @@ Cflags: -I$${includedir}
 
 onTest ctx => {
 	installDir := ctx.outputDir
-	testDir := os.mkdirTemp("", "tinymidi-consumer-")!
-	defer os.removeAll(testDir)
-	testSource := filepath.join(testDir, "consumer.c")
-	binary := filepath.join(testDir, "consumer")
-	os.writeFile(testSource, []byte(consumerSource), 0o644)!
+	testDir := filepath.join(ctx.SourceDir, "_llar_consumer")
+	os.mkdirAll(testDir, 0o755)!
+
+	consumer := filepath.join(testDir, "consumer.c")
+	os.writeFile(consumer, []byte(consumerSource), 0o644)!
 
 	pkgconfig.use installDir
-	args := []string{testSource}
-	args <- strings.fields(pkgconfig.lookup("tinymidi")!)...
-	args <- "-o", binary
-	cc! args...
+	flags := pkgconfig.lookup("tinymidi")!
+	flagsFile := filepath.join(testDir, "tinymidi.flags")
+	os.writeFile(flagsFile, []byte(flags), 0o644)!
 
-	if slices.contains(target.options["shared"], "ON") {
-		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
-		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
-	}
+	binary := filepath.join(testDir, "consumer")
+	cc! consumer, "@"+flagsFile, "-o", binary
+
+	os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
+	os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	exec! binary
 }
