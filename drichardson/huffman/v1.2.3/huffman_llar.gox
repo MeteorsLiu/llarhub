@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 )
 
@@ -57,12 +56,14 @@ onBuild ctx => {
 	sourcePath := filepath.join(ctx.SourceDir, "huffman.c")
 	source := string(os.readFile(sourcePath)!)
 	source = strings.replace(source, "#ifdef WIN32", "#if defined _WIN32 || defined __CYGWIN__", 1)
-	os.writeFile(sourcePath, []byte(source), 0644)!
+	os.writeFile(sourcePath, []byte(source), 0o644)!
 
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
+	c.define "CMAKE_POLICY_VERSION_MINIMUM", "3.5"
+	c.define "CMAKE_INSTALL_LIBDIR", "lib"
 	c.defineBool "BUILD_SHARED_LIBS", shared
 	c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
 	c.configure
@@ -70,27 +71,27 @@ onBuild ctx => {
 	c.install
 
 	licenseDir := filepath.join(installDir, "licenses")
-	os.mkdirAll(licenseDir, 0755)!
-	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0644)!
+	os.mkdirAll(licenseDir, 0o755)!
+	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	libs := "-L$${libdir} -lhuffman"
-	if slices.contains(target.require["os"], "windows") {
-		libs += " -lws2_32"
+	libs := ["-L$${libdir}", "-lhuffman"]
+	if target.require["os"][0] == "windows" {
+		libs <- "-lws2_32"
 	}
 
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
-	os.mkdirAll(pcDir, 0755)!
-	pc := `prefix=$${pcfiledir}/../..
-includedir=$${prefix}/include
-libdir=$${prefix}/lib
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "huffman",
+		description = "Huffman encoder and decoder library",
+		version = "v1.2.3",
+		libs = libs,
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "huffman.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
-Name: huffman
-Description: Huffman encoder and decoder library
-Version: 1.2.3
-Libs: ` + libs + `
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "huffman.pc"), []byte(pc), 0644)!
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("huffman")!
 }
@@ -98,23 +99,22 @@ Cflags: -I$${includedir}
 onTest ctx => {
 	installDir := ctx.outputDir
 	testDir := filepath.join(ctx.SourceDir, "_llar_consumer")
-	os.mkdirAll(testDir, 0755)!
+	os.mkdirAll(testDir, 0o755)!
 
 	sourcePath := filepath.join(testDir, "consumer.c")
-	os.writeFile(sourcePath, []byte(consumerSource), 0644)!
+	os.writeFile(sourcePath, []byte(consumerSource), 0o644)!
+
+	pkgconfig.use installDir
+	flagsFile := filepath.join(testDir, "huffman.flags")
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("huffman")!), 0o644)!
 
 	binary := filepath.join(testDir, "consumer")
-	pkgconfig.use installDir
-	flags := strings.fields(pkgconfig.lookup("huffman")!)
-	args := []string{sourcePath}
-	args <- flags...
-	args <- "-o", binary
-	cc! args...
+	cc! sourcePath, "-o", binary, "@"+flagsFile
 
-	if slices.contains(target.options["shared"], "ON") {
+	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
-		if slices.contains(target.require["os"], "windows") {
+		if target.require["os"][0] == "windows" {
 			path := os.getenv("PATH")
 			os.setenv("PATH", filepath.join(installDir, "bin")+";"+path)!
 		}
