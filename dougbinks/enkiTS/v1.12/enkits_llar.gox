@@ -50,6 +50,8 @@ onBuild ctx => {
 	os.writeFile(cmakeLists, []byte(source), 0o644)!
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
+	c.buildType "Release"
+	c.define "CMAKE_POLICY_VERSION_MINIMUM", "3.5"
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
 	c.defineBool "ENKITS_INSTALL", true
 	c.defineBool "ENKITS_BUILD_EXAMPLES", false
@@ -64,12 +66,16 @@ onBuild ctx => {
 	os.writeFile(filepath.join(licenseDir, "License.txt"), os.readFile(filepath.join(ctx.SourceDir, "License.txt"))!, 0o644)!
 
 	libs := ["-L$${libdir}", "-lenkiTS"]
-	if target.require["os"][0] == "linux" || target.require["os"][0] == "freebsd" {
+	osName := target.require["os"][0]
+	if osName == "linux" || osName == "freebsd" {
 		libs <- "-lm"
 		libs <- "-lpthread"
 		libs <- "-lstdc++"
-	} else {
+	} else if osName == "darwin" {
+		libs <- "-lpthread"
 		libs <- "-lc++"
+	} else {
+		libs <- "-lstdc++"
 	}
 
 	cflags := ["-I$${includedir}", "-DENKITS_TASK_PRIORITIES_NUM=3"]
