@@ -1,8 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 )
 
 var cMakeLists = `cmake_minimum_required(VERSION 3.15)
@@ -55,12 +53,13 @@ onBuild ctx => {
 	os.mkdirAll(cmakeDir, 0o755)!
 	os.writeFile(filepath.join(cmakeDir, "CMakeLists.txt"), []byte(cMakeLists), 0o644)!
 
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
-	dotMatchesNewline := slices.contains(target.options["dot_matches_newline"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
+	dotMatchesNewline := target.options["dot_matches_newline"][0] == "ON"
 
 	c := cmake.new(cmakeDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "TINY_REGEX_C_SRC_DIR", ctx.SourceDir
+	c.define "CMAKE_INSTALL_LIBDIR", "lib"
 	c.defineBool "BUILD_SHARED_LIBS", shared
 	c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
 	c.defineBool "RE_DOT_MATCHES_NEWLINE", dotMatchesNewline
@@ -72,20 +71,26 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	// The upstream repository has no release tags or pkg-config file: clib.json
-	// only lists re.c and re.h. Keep the validated consumer flags instead of
-	// inventing package metadata that the source does not publish.
 	dotDefine := "0"
 	if dotMatchesNewline {
 		dotDefine = "1"
 	}
-	flags := []string{
-		"-I" + filepath.join(installDir, "include"),
-		"-DRE_DOT_MATCHES_NEWLINE=" + dotDefine,
-		"-L" + filepath.join(installDir, "lib"),
-		"-ltiny-regex-c",
-	}
-	ctx.setMetadata strings.join(flags, " ")
+
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "tiny-regex-c",
+		description = "A small regex implementation in C",
+		version = "98d0bf28278b2230f95b7ba39744cb29b806f03a",
+		libs = ["-L$${libdir}", "-ltiny-regex-c"],
+		cflags = ["-I$${includedir}", "-DRE_DOT_MATCHES_NEWLINE="+dotDefine],
+	)!
+	out := os.create(filepath.join(pcDir, "tiny-regex-c.pc"))!
+	pc.writeTo(out)!
+	out.close()!
+
+	pkgconfig.use installDir
+	ctx.setMetadata pkgconfig.lookup("tiny-regex-c")!
 }
 
 onTest ctx => {
@@ -96,20 +101,13 @@ onTest ctx => {
 	consumer := filepath.join(testDir, "test1.c")
 	os.writeFile(consumer, os.readFile(filepath.join(ctx.SourceDir, "tests", "test1.c"))!, 0o644)!
 
-	dotDefine := "0"
-	if slices.contains(target.options["dot_matches_newline"], "ON") {
-		dotDefine = "1"
-	}
-	shared := slices.contains(target.options["shared"], "ON")
+	pkgconfig.use installDir
+	flagsFile := filepath.join(testDir, "tiny-regex-c.flags")
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("tiny-regex-c")!), 0o644)!
+
 	binary := filepath.join(testDir, "consumer")
-	cc! "-std=c99",
-		"-I" + filepath.join(installDir, "include"),
-		"-DRE_DOT_MATCHES_NEWLINE=" + dotDefine,
-		consumer,
-		"-L" + filepath.join(installDir, "lib"),
-		"-ltiny-regex-c",
-		"-o", binary
-	if shared {
+	cc! "-std=c99", consumer, "-o", binary, "@"+flagsFile
+	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	}
