@@ -2,6 +2,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 )
 
 const consumerSource = `#include "FastNoise/FastNoise.h"
@@ -43,6 +44,18 @@ onBuild ctx => {
 	installDir := ctx.outputDir
 	shared := target.options["shared"][0] == "ON"
 	fPIC := target.options["fPIC"][0] == "ON"
+	arch := target.require["arch"][0]
+	x86 := arch == "amd64" || arch == "386"
+
+	// FastNoise2 always injects the x86-only -mno-vzeroupper flag for GNU
+	// compilers. Strip it on non-x86 so ARM builds do not fail.
+	cmakeLists := filepath.join(ctx.SourceDir, "src", "CMakeLists.txt")
+	source := string(os.readFile(cmakeLists)!)
+	if !x86 {
+		source = strings.replaceAll(source, "target_compile_options(FastSIMD_FastNoise PRIVATE -mno-vzeroupper)", "")
+		source = strings.replaceAll(source, "target_compile_options(FastSIMD_FastNoise PRIVATE -mllvm -x86-use-vzeroupper=0)", "")
+		os.writeFile(cmakeLists, []byte(source), 0o644)!
+	}
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
@@ -60,17 +73,6 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	version := ""
-	for line in string(os.readFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"))!).split("\n") {
-		if line.hasPrefix("project(FastNoise2 VERSION ") {
-			version = line.trimPrefix("project(FastNoise2 VERSION ").split(")")[0]
-			break
-		}
-	}
-	if version == "" {
-		panic "FastNoise2 CMakeLists.txt has no project version"
-	}
-
 	libName := "FastNoise"
 	for entry in os.readDir(filepath.join(installDir, "lib"))! {
 		if entry.isDir {
@@ -83,29 +85,27 @@ onBuild ctx => {
 		}
 	}
 
-	cflags := "-I$${includedir}"
+	cflags := ["-I$${includedir}"]
 	if !shared {
-		cflags += " -DFASTNOISE_STATIC_LIB"
+		cflags <- "-DFASTNOISE_STATIC_LIB"
 	}
-	libs := "-L$${libdir} -l" + libName
+	libs := ["-L$${libdir}", "-l"+libName]
 	if slices.contains(target.require["os"], "linux") {
-		libs += " -lm"
+		libs <- "-lm"
 	}
 
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: FastNoise2
-Description: Modular node graph based noise generation library using SIMD, C++17 and templates
-Version: ` + version + `
-Libs: ` + libs + `
-Cflags: ` + cflags + `
-`
-	os.writeFile(filepath.join(pcDir, "FastNoise2.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "FastNoise2",
+		description = "Modular node graph based noise generation library using SIMD, C++17 and templates",
+		version = "v1.1.1",
+		libs = libs,
+		cflags = cflags,
+	)!
+	out := os.create(filepath.join(pcDir, "FastNoise2.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("FastNoise2")!
