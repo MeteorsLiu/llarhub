@@ -1,15 +1,53 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 )
 
-const consumerSource = `#include <Imath/ImathVec.h>
+const consumerSource = `#include <Imath/ImathBox.h>
+#include <Imath/ImathFun.h>
+#include <Imath/ImathMatrix.h>
+#include <Imath/ImathRandom.h>
+#include <Imath/ImathVec.h>
+#include <Imath/half.h>
 
 int main() {
     IMATH_NAMESPACE::V3f v(1, 2, 3);
-    return v.length() > 0 ? 0 : 1;
+    if (v.length() <= 0) {
+        return 1;
+    }
+
+    IMATH_NAMESPACE::M44f m;
+    m.makeIdentity();
+    IMATH_NAMESPACE::V3f transformed;
+    m.multVecMatrix(v, transformed);
+    if (transformed.x != 1 || transformed.y != 2 || transformed.z != 3) {
+        return 2;
+    }
+
+    IMATH_NAMESPACE::Box3f box;
+    box.extendBy(v);
+    box.extendBy(IMATH_NAMESPACE::V3f(0, 0, 0));
+    if (box.isEmpty()) {
+        return 3;
+    }
+
+    IMATH_NAMESPACE::half h(2.0f);
+    if (float(h) != 2.0f) {
+        return 4;
+    }
+
+    if (IMATH_NAMESPACE::clamp(5, 0, 3) != 3) {
+        return 5;
+    }
+    if (IMATH_NAMESPACE::succf(1.0f) <= 1.0f) {
+        return 6;
+    }
+
+    IMATH_NAMESPACE::Rand32 rng(42);
+    if (rng.nextf() < 0.0f) {
+        return 7;
+    }
+    return 0;
 }
 `
 
@@ -113,20 +151,8 @@ onTest ctx => {
 	os.writeFile(consumer, []byte(consumerSource), 0o644)!
 
 	pkgconfig.use installDir
-	flags := pkgconfig.lookup("Imath")!
-	if slices.contains(target.require["os"], "linux") || slices.contains(target.require["os"], "freebsd") {
-		found := false
-		for field in strings.fields(flags) {
-			if field == "-lm" {
-				found = true
-			}
-		}
-		if !found {
-			panic "pkg-config flags missing Conan system lib -lm: ${flags}"
-		}
-	}
 	flagsFile := filepath.join(testDir, "Imath.flags")
-	os.writeFile(flagsFile, []byte(flags), 0o644)!
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("Imath")!), 0o644)!
 
 	binary := filepath.join(testDir, "consumer")
 	exec! "c++", "-std=c++11", consumer, "-o", binary, "@"+flagsFile

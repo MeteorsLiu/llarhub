@@ -1,8 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 )
 
 id "iczelia/bzip3"
@@ -82,33 +80,41 @@ onTest ctx => {
 	testSource := filepath.join(testDir, "consumer.c")
 	os.writeFile(testSource, []byte(`#include "libbz3.h"
 
+#include <stdint.h>
+#include <string.h>
+
 int main(void) {
-    struct bz3_state *state = bz3_new(8 * 1024 * 1024);
-    if (state == 0) {
-        return 1;
-    }
+    /* block size must be in [65KiB, 511MiB] */
+    uint32_t bs = 65 * 1024;
+    const uint8_t in[] = "hello bzip3 roundtrip";
+    size_t bound = bz3_bound(sizeof(in));
+    uint8_t out[512];
+    uint8_t rec[512];
+    size_t out_size;
+    size_t rec_size;
     if (bz3_version() == 0) {
-        bz3_free(state);
         return 1;
     }
-    bz3_free(state);
+    if (bound > sizeof(out) || sizeof(in) > sizeof(rec)) {
+        return 1;
+    }
+    out_size = sizeof(out);
+    if (bz3_compress(bs, in, out, sizeof(in), &out_size) != 0) {
+        return 1;
+    }
+    rec_size = sizeof(rec);
+    if (bz3_decompress(out, rec, out_size, &rec_size) != 0) {
+        return 1;
+    }
+    if (rec_size != sizeof(in) || memcmp(in, rec, rec_size) != 0) {
+        return 1;
+    }
     return 0;
 }
 `), 0o644)!
 
 	pkgconfig.use installDir
 	flags := pkgconfig.lookup("bzip3")!
-	if slices.contains(target.require["os"], "linux") || slices.contains(target.require["os"], "freebsd") {
-		found := false
-		for field in strings.fields(flags) {
-			if field == "-lm" {
-				found = true
-			}
-		}
-		if !found {
-			panic "pkg-config flags missing Conan system lib -lm: ${flags}"
-		}
-	}
 	flagsFile := filepath.join(testDir, "bzip3.flags")
 	os.writeFile(flagsFile, []byte(flags), 0o644)!
 

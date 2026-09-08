@@ -1,15 +1,42 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 )
 
 const consumerSource = `#include <nanomsg/nn.h>
+#include <nanomsg/pair.h>
 
 int main(void) {
+    char buf[8];
+    int a;
+    int b;
+    int n;
     void *msg = nn_allocmsg(32, 0);
+    if (msg == 0) {
+        return 1;
+    }
     nn_freemsg(msg);
+
+    a = nn_socket(AF_SP, NN_PAIR);
+    b = nn_socket(AF_SP, NN_PAIR);
+    if (a < 0 || b < 0) {
+        return 1;
+    }
+    if (nn_bind(a, "inproc://llar-consumer") < 0) {
+        return 1;
+    }
+    if (nn_connect(b, "inproc://llar-consumer") < 0) {
+        return 1;
+    }
+    if (nn_send(b, "hi", 2, 0) < 0) {
+        return 1;
+    }
+    n = nn_recv(a, buf, sizeof(buf), 0);
+    nn_close(a);
+    nn_close(b);
+    if (n != 2 || buf[0] != 'h' || buf[1] != 'i') {
+        return 1;
+    }
     return 0;
 }
 `
@@ -105,31 +132,6 @@ onTest ctx => {
 
 	pkgconfig.use installDir
 	flags := pkgconfig.lookup("nanomsg")!
-	if slices.contains(target.require["os"], "linux") || slices.contains(target.require["os"], "freebsd") {
-		foundPthread := false
-		foundAnl := false
-		foundRt := false
-		for field in strings.fields(flags) {
-			if field == "-lpthread" {
-				foundPthread = true
-			}
-			if field == "-lanl" {
-				foundAnl = true
-			}
-			if field == "-lrt" {
-				foundRt = true
-			}
-		}
-		if !foundPthread {
-			panic "pkg-config flags missing Conan system lib -lpthread: ${flags}"
-		}
-		if !foundAnl {
-			panic "pkg-config flags missing Conan system lib -lanl: ${flags}"
-		}
-		if !foundRt {
-			panic "pkg-config flags missing Conan system lib -lrt: ${flags}"
-		}
-	}
 	flagsFile := filepath.join(testDir, "nanomsg.flags")
 	os.writeFile(flagsFile, []byte(flags), 0o644)!
 

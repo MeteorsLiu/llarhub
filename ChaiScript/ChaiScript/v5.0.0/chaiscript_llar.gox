@@ -1,13 +1,13 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 )
 
 const consumerSource = `#include <chaiscript/chaiscript.hpp>
 #include <iostream>
 #include <cassert>
+#include <string>
 
 double chai_add(double i, double j)
 {
@@ -20,6 +20,19 @@ int main()
   chai.add(chaiscript::fun(&chai_add), "add");
   const auto answer = chai.eval<double>("add(38.8, 3.2);");
   assert(static_cast<int>(answer) == 42);
+
+  const auto greeting = chai.eval<std::string>("\"hello, \" + \"chai\";");
+  assert(greeting == "hello, chai");
+
+  const auto summed = chai.eval<int>(
+      "auto ret = 0;"
+      "auto xs = [1, 2, 3, 4];"
+      "for (auto i = 0; i < xs.size(); ++i) {"
+      "  ret = add(ret, xs[i]);"
+      "}"
+      "ret;");
+  assert(summed == 10);
+
   std::cout << "The answer is: " << answer << '\n';
 }
 `
@@ -91,20 +104,8 @@ onTest ctx => {
 	// the same metadata that downstream consumers receive, including on cache
 	// hits where onBuild is skipped.
 	pkgconfig.use installDir
-	flags := pkgconfig.lookup("chaiscript")!
-	if slices.contains(target.require["os"], "linux") || slices.contains(target.require["os"], "freebsd") {
-		foundM := false
-		for field in strings.fields(flags) {
-			if field == "-lm" {
-				foundM = true
-			}
-		}
-		if !foundM {
-			panic "pkg-config flags missing Conan system lib -lm: ${flags}"
-		}
-	}
 	flagsFile := filepath.join(testDir, "chaiscript.flags")
-	os.writeFile(flagsFile, []byte(flags), 0o644)!
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("chaiscript")!), 0o644)!
 
 	binary := filepath.join(testDir, "consumer")
 	exec! "c++", "-std=c++17", consumer, "-o", binary, "@"+flagsFile

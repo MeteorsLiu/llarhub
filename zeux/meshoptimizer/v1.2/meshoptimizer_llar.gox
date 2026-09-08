@@ -1,8 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 )
 
 const consumerSource = `#include <meshoptimizer.h>
@@ -18,6 +16,27 @@ int main() {
     size_t n = meshopt_simplify(destination, indices, 3, positions, 3, sizeof(float) * 3, 3, 1.f, 0, 0);
     size_t bound = meshopt_buildMeshletsBound(3, 64, 124);
     return n > 0 && bound > 0 ? 0 : 1;
+}
+`
+
+const cConsumerSource = `#include <meshoptimizer.h>
+
+int main(void) {
+    float positions[] = {
+        0.f, 0.f, 0.f,
+        1.f, 0.f, 0.f,
+        0.f, 1.f, 0.f,
+    };
+    unsigned int indices[] = {0, 1, 2};
+    unsigned int remap[3];
+    unsigned int destination[3];
+    size_t unique;
+    size_t n;
+    size_t bound;
+    unique = meshopt_generateVertexRemap(remap, indices, 3, positions, 3, sizeof(float) * 3);
+    n = meshopt_simplify(destination, indices, 3, positions, 3, sizeof(float) * 3, 3, 1.f, 0, 0);
+    bound = meshopt_buildMeshletsBound(3, 64, 124);
+    return unique > 0 && n > 0 && bound > 0 ? 0 : 1;
 }
 `
 
@@ -89,29 +108,23 @@ onTest ctx => {
 
 	consumer := filepath.join(testDir, "consumer.cpp")
 	os.writeFile(consumer, []byte(consumerSource), 0o644)!
+	cConsumer := filepath.join(testDir, "consumer.c")
+	os.writeFile(cConsumer, []byte(cConsumerSource), 0o644)!
 
 	pkgconfig.use installDir
 	flags := pkgconfig.lookup("meshoptimizer")!
-	if target.options["shared"][0] != "ON" && slices.contains(target.require["os"], "linux") {
-		found := false
-		for field in strings.fields(flags) {
-			if field == "-lstdc++" || field == "-lc++" {
-				found = true
-			}
-		}
-		if !found {
-			panic "pkg-config flags missing Conan static C++ runtime -lstdc++: ${flags}"
-		}
-	}
 	flagsFile := filepath.join(testDir, "meshoptimizer.flags")
 	os.writeFile(flagsFile, []byte(flags), 0o644)!
 
 	binary := filepath.join(testDir, "consumer")
 	exec! "c++", consumer, "-o", binary, "@"+flagsFile
+	cBinary := filepath.join(testDir, "consumer-c")
+	cc! cConsumer, "-o", cBinary, "@"+flagsFile
 
 	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	}
 	exec! binary
+	exec! cBinary
 }

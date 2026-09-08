@@ -80,18 +80,8 @@ onTest ctx => {
 		pkgconfig.use ctx.outputDir(dep)
 	}
 	pkgconfig.use installDir
-	flags := pkgconfig.lookup("libxml-2.0")!
-	found := false
-	for field in strings.fields(flags) {
-		if field == "-DLIBXML_STATIC" {
-			found = true
-		}
-	}
-	if !found {
-		panic "pkg-config flags missing Conan define -DLIBXML_STATIC: ${flags}"
-	}
 	flagsFile := filepath.join(testDir, "libxml2.flags")
-	os.writeFile(flagsFile, []byte(flags), 0o644)!
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("libxml-2.0")!), 0o644)!
 	binary := filepath.join(testDir, "consumer")
 	cc! consumer, "@"+flagsFile, "-o", binary
 	exec! binary

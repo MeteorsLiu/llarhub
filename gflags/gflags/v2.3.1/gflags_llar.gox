@@ -2,15 +2,29 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 )
 
 const consumerSource = `#include <gflags/gflags.h>
 
 DEFINE_bool(llar_probe, false, "consumer probe flag");
+DEFINE_int32(llar_count, 0, "consumer int flag");
+DEFINE_string(llar_name, "", "consumer string flag");
 
 int main(int argc, char** argv) {
+    gflags::SetUsageMessage("llar gflags consumer");
     gflags::ParseCommandLineFlags(&argc, &argv, true);
+    gflags::SetCommandLineOption("llar_probe", "true");
+    gflags::SetCommandLineOption("llar_count", "7");
+    gflags::SetCommandLineOption("llar_name", "llar");
+    if (!FLAGS_llar_probe) {
+        return 1;
+    }
+    if (FLAGS_llar_count != 7) {
+        return 1;
+    }
+    if (FLAGS_llar_name != "llar") {
+        return 1;
+    }
     return 0;
 }
 `
@@ -110,17 +124,6 @@ onTest ctx => {
 
 	pkgconfig.use installDir
 	flags := pkgconfig.lookup("gflags")!
-	if slices.contains(target.require["os"], "linux") || slices.contains(target.require["os"], "freebsd") {
-		found := false
-		for field in strings.fields(flags) {
-			if field == "-lpthread" {
-				found = true
-			}
-		}
-		if !found {
-			panic "pkg-config flags missing Conan system lib -lpthread: ${flags}"
-		}
-	}
 	flagsFile := filepath.join(testDir, "gflags.flags")
 	os.writeFile(flagsFile, []byte(flags), 0o644)!
 

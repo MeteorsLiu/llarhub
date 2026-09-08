@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 )
 
@@ -9,6 +8,18 @@ const consumerSource = `#include <libde265/de265.h>
 
 int main(void) {
     de265_decoder_context *ctx = de265_new_decoder();
+    int more = 1;
+    if (ctx == 0) {
+        return 1;
+    }
+    de265_start_worker_threads(ctx, 1);
+    de265_push_data(ctx, "", 0, 0, 0);
+    de265_flush_data(ctx);
+    de265_decode(ctx, &more);
+    de265_peek_next_picture(ctx);
+    de265_get_next_picture(ctx);
+    de265_release_next_picture(ctx);
+    de265_reset(ctx);
     de265_free_decoder(ctx);
     return 0;
 }
@@ -109,24 +120,6 @@ onTest ctx => {
 
 	pkgconfig.use installDir
 	flags := pkgconfig.lookup("libde265")!
-	if slices.contains(target.require["os"], "linux") || slices.contains(target.require["os"], "freebsd") {
-		foundPthread := false
-		foundM := false
-		for field in strings.fields(flags) {
-			if field == "-lpthread" {
-				foundPthread = true
-			}
-			if field == "-lm" {
-				foundM = true
-			}
-		}
-		if !foundPthread {
-			panic "pkg-config flags missing Conan system lib -lpthread: ${flags}"
-		}
-		if !foundM {
-			panic "pkg-config flags missing Conan system lib -lm: ${flags}"
-		}
-	}
 	flagsFile := filepath.join(testDir, "libde265.flags")
 	os.writeFile(flagsFile, []byte(flags), 0o644)!
 

@@ -67,6 +67,7 @@ onTest ctx => {
 	source := `#include <json.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 int main(void) {
     json_object *jobj = json_object_new_object();
@@ -76,6 +77,24 @@ int main(void) {
     json_object_object_add(jobj, "Categories", jarray);
     printf("%s\n", json_object_to_json_string(jobj));
     json_object_put(jobj);
+
+    json_object *parsed = json_tokener_parse("{\"n\":7,\"s\":\"llar\"}");
+    json_object *n;
+    json_object *s;
+    if (parsed == NULL) {
+        return 1;
+    }
+    n = json_object_object_get(parsed, "n");
+    s = json_object_object_get(parsed, "s");
+    if (json_object_get_int(n) != 7) {
+        json_object_put(parsed);
+        return 1;
+    }
+    if (strcmp(json_object_get_string(s), "llar") != 0) {
+        json_object_put(parsed);
+        return 1;
+    }
+    json_object_put(parsed);
     return EXIT_SUCCESS;
 }
 `

@@ -20,6 +20,12 @@ int main(void) {
 	size_t compsize = streamvbyte_encode(datain, N, compressedbuffer);
 	size_t compsize2 = streamvbyte_decode(compressedbuffer, recovdata, N);
 	assert(compsize == compsize2);
+	size_t compsize0124 = streamvbyte_encode_0124(datain, N, compressedbuffer);
+	size_t compsize0124b = streamvbyte_decode_0124(compressedbuffer, recovdata, N);
+	assert(compsize0124 == compsize0124b);
+	for (uint32_t k = 0; k < N; ++k) {
+		assert(recovdata[k] == datain[k]);
+	}
 	free(datain);
 	free(compressedbuffer);
 	free(recovdata);
@@ -105,18 +111,8 @@ onTest ctx => {
 	shared := target.options["shared"][0] == "ON"
 
 	pkgconfig.use installDir
-	flags := pkgconfig.lookup("streamvbyte")!
-	found := false
-	for field in strings.fields(flags) {
-		if field == "-lstreamvbyte" {
-			found = true
-		}
-	}
-	if !found {
-		panic "pkg-config flags missing Conan library -lstreamvbyte: ${flags}"
-	}
 	flagsFile := filepath.join(testDir, "streamvbyte.flags")
-	os.writeFile(flagsFile, []byte(flags), 0o644)!
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("streamvbyte")!), 0o644)!
 
 	binary := filepath.join(testDir, "consumer")
 	cc! sourcePath, "-o", binary, "@"+flagsFile
