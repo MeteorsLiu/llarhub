@@ -48,7 +48,12 @@ documentation as a substitute for that source.
 6. Perform an XGo style pass. Replace redundant setup, error checks, package
    qualifiers, and temporary collections with the simpler verified XGo/gsh
    form from the style reference.
-7. Compile through LLAR's actual ixgo path, then run the target repository's
+7. When a Conan Center recipe exists for the same package, diff the published
+   `.pc` `Libs`/`Cflags` against that recipe's `package_info()` and prove
+   `onTest` would fail if those Conan tokens were missing. A green `llar make`
+   is not enough. Read [Formula Semantics](references/formula-semantics.md)
+   sections **Conan Flag Audit** and **Consumer Test**.
+8. Compile through LLAR's actual ixgo path, then run the target repository's
    Formula validation for exact and representative versions, options, and
    cache-hit tests required by the change.
 
@@ -111,6 +116,12 @@ LLAR's configured streams, working directory, and execution path.
   fragment, or a libs-only query, for the complete result.
 - Keep consumer tests independent of the build scratch tree so they can run on
   a cache hit.
+- After writing a C/C++ Formula, if a Conan Center recipe exists, the work is
+  not finished until (1) published `.pc` flags match that recipe's
+  `package_info()` for linux amd64 static Release defaults plus every retained
+  option that changes exports, and (2) `onTest` fails when any of those Conan
+  tokens is missing. Do not treat a C++ driver as proof of `-lm`, `-lpthread`,
+  or `-lstdc++`. Do not hide a miss by adding those flags on the test line.
 - In `onBuild`, compile and install C/C++ packages only through the LLAR
   CMake or Autotools helper. Do not call `cc`, `c++`, `gcc`, `clang`, `ar`,
   `ld`, or equivalent compilers and archivers from `onBuild`. Naked compiler
@@ -164,7 +175,11 @@ At minimum, prove:
 - required command failure propagation;
 - installed headers, libraries, tools, or package metadata, including the
   installed `.pc` file and complete pkg-config lookup result when applicable;
+- when a Conan Center recipe exists: `.pc` `Libs`/`Cflags` vs `package_info()`
+  (`libs`, `system_libs`, `defines`, extra `includedirs`, components /
+  `pkg_config_name`), and `onTest` coverage of every missing-token risk;
 - consumer behavior after a fresh build and, when supported, a cache hit.
 
 Do not accept successful parsing or compilation as proof that the installed
-package is usable.
+package is usable. Do not accept a consumer that never needs a Conan export as
+proof that the `.pc` contains that export.

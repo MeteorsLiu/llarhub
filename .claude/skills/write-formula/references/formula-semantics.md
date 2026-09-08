@@ -232,6 +232,33 @@ query to a header-only library even though its libs portion is empty.
 Do not copy a package manager's `package_info` declaration without comparing it
 to the actual installed result.
 
+## Conan Flag Audit
+
+When a [Conan Center](https://github.com/conan-io/conan-center-index) recipe
+exists for the same package, the Formula is not done after a successful
+consumer compile. Diff the published `.pc` against that recipe's
+`package_info()` before calling the work finished.
+
+Read the live `recipes/<name>/all/conanfile.py`, not a remembered mapping.
+Baseline: linux amd64 static Release, default options, plus every retained
+option that changes exported flags (`shared`, `nothreads`, components).
+
+| Conan `package_info()` | LLAR `.pc` |
+|---|---|
+| `cpp_info.libs` / component `libs` | `Libs:` `-l…` |
+| `system_libs` | extra `Libs:` `-l…` (linux typically `m`, `pthread`, `rt`, `anl`, `dl`) |
+| `defines` | `Cflags:` `-D…` |
+| extra `includedirs` beyond `include` | extra `Cflags:` `-I…` |
+| `pkg_config_name` / components | `.pc` filename, `Name:`, `Requires:` |
+
+Missing Conan exports are a Formula defect. Extra LLAR flags (C++ runtime, an
+extra `-I` that still compiles the Conan include form) are not automatically
+wrong, but record them. Confirm the installed archive and headers exist; still
+publish every Conan public token a PkgConfigDeps consumer would receive.
+
+`pkgconfig.lookup` does not pass `--static`. Put unix system libs the consumer
+needs on public `Libs`, not only `Libs.private`.
+
 ## Consumer Test
 
 Base `onTest` on upstream or reference-package consumer behavior. Build against
@@ -242,6 +269,45 @@ When the Formula publishes pkg-config metadata, require the installed `.pc`
 file and compile/link the consumer with the complete flags returned by the
 verified cflags-and-libs lookup. A test that reconstructs `-I`, `-L`, or `-l`
 flags independently does not validate the published metadata.
+
+`onTest` must fail if a required Conan export is missing from the published
+`.pc`. A green consumer that never needs the flag is not coverage.
+
+- Compile/link with **only** `pkgconfig.lookup` flags. Do not add `-lm`,
+  `-lpthread`, `-lstdc++`, or extra `-I` on the test line; that hides the gap.
+- `exec! "c++"` / `c++!` does **not** prove `-lm`, `-lpthread`, or `-lstdc++`:
+  libstdc++ already pulls them. Use a C consumer, or assert lookup tokens.
+- Include headers the way Conan consumers do. If Conan adds
+  `includedirs=['include', 'include/json-c']`, the test must `#include <json.h>`,
+  not only `<json-c/json.h>`. If Conan leaves `include/` as the root,
+  `#include <libdxfrw/libdxfrw.h>`, not only `<libdxfrw.h>`.
+- Lookup **every** published `.pc` (contrib/components too), not only the
+  primary name.
+- If static and shared export different libs or defines, cover the
+  configuration CI actually runs **and** fail when the other option is
+  selected. Default-only CI will not see a shared-only miss.
+- Token-match lookup output (`strings.fields`), not substring:
+  `-lstreamvbyte_static` does not satisfy `-lstreamvbyte`.
+- Do not make tests fail on extras vs Conan.
+- A Conan over-export the archive does not actually reference still belongs on
+  the `.pc` if we match `package_info()`. Prove it with a lookup-token
+  assertion, not a fake consumer that calls `log()` just to pull libm.
+
+```xgo
+pkgconfig.use installDir
+flags := pkgconfig.lookup("foo")!
+if slices.contains(target.require["os"], "linux") {
+    found := false
+    for field in strings.fields(flags) {
+        if field == "-lm" {
+            found = true
+        }
+    }
+    if !found {
+        panic "pkg-config flags missing Conan system lib -lm: ${flags}"
+    }
+}
+```
 
 Use a test build tree distinct from the build callback's scratch tree. A cached
 artifact may skip the build callback while still running the consumer test.
