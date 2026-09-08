@@ -1,8 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 )
 
 const consumerSource = `#include <miniz.h>
@@ -139,8 +137,8 @@ filter => {
 
 onBuild ctx => {
 	installDir := ctx.outputDir
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
@@ -162,13 +160,19 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	// Upstream miniz.pc.in bakes CMAKE_INSTALL_PREFIX into prefix. Keep the
-	// installed Name/Description/Version/Libs/Cflags, including includedir
-	// under include/miniz, and make only the prefix relocatable.
-	pcPath := filepath.join(installDir, "lib", "pkgconfig", "miniz.pc")
-	pc := string(os.readFile(pcPath)!)
-	pc = strings.replace(pc, "prefix="+installDir, "prefix=$${pcfiledir}/../..", 1)
-	os.writeFile(pcPath, []byte(pc), 0o644)!
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		variables = {"includedir": "$${prefix}/include/miniz"},
+		name = "miniz",
+		description = "Lossless data compression library",
+		version = "3.0.1",
+		libs = ["-L$${libdir}", "-lminiz"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "miniz.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("miniz")!
@@ -187,9 +191,9 @@ onTest ctx => {
 	os.writeFile(flagsFile, []byte(pkgconfig.lookup("miniz")!), 0o644)!
 
 	binary := filepath.join(testDir, "consumer")
-	cc! consumer, "-o", binary, "@"+flagsFile
+	cc! consumer, "@"+flagsFile, "-o", binary
 
-	if slices.contains(target.options["shared"], "ON") {
+	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	}
