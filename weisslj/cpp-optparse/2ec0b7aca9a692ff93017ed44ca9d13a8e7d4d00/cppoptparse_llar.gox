@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
 )
 
 const consumerSource = `#include <string>
@@ -60,11 +59,10 @@ onBuild ctx => {
 	cmakeLists := ctx.Proj.readFile("2ec0b7aca9a692ff93017ed44ca9d13a8e7d4d00/CMakeLists.txt")!
 	os.writeFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"), cmakeLists, 0o644)!
 
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CPP_OPTPARSE_SRC_DIR", ctx.SourceDir
-	// pkgconfig.use searches the installed lib/pkgconfig directory.
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
 	c.defineBool "BUILD_SHARED_LIBS", shared
 	c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
@@ -76,24 +74,22 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	libs := "-L$${libdir} -lOptionParser"
-	if slices.contains(target.require["os"], "linux") || slices.contains(target.require["os"], "freebsd") {
-		libs += " -lm"
+	libs := ["-L$${libdir}", "-lOptionParser"]
+	if target.require["os"][0] == "linux" || target.require["os"][0] == "freebsd" {
+		libs <- "-lm"
 	}
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: cpp-optparse
-Description: Python's excellent OptionParser in C++
-Version: 2ec0b7aca9a692ff93017ed44ca9d13a8e7d4d00
-Libs: ` + libs + `
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "cpp-optparse.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "cpp-optparse",
+		description = "Python's excellent OptionParser in C++",
+		version = "2ec0b7aca9a692ff93017ed44ca9d13a8e7d4d00",
+		libs = libs,
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "cpp-optparse.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("cpp-optparse")!
@@ -113,7 +109,7 @@ onTest ctx => {
 	os.writeFile(flagsFile, []byte(pkgconfig.lookup("cpp-optparse")!), 0o644)!
 	exec! "c++", sourcePath, "-o", binary, "@"+flagsFile
 
-	if slices.contains(target.options["shared"], "ON") {
+	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	}
