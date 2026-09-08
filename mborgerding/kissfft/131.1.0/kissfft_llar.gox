@@ -59,6 +59,7 @@ onBuild ctx => {
 	datatype := target.options["datatype"][0]
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
+	c.buildType "Release"
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
 	c.define "CMAKE_INSTALL_INCLUDEDIR", "include"
 	c.define "KISSFFT_DATATYPE", datatype
@@ -85,6 +86,9 @@ onBuild ctx => {
 	}
 
 	libs := ["-L$${libdir}", "-l"+libName]
+	if target.require["os"][0] == "linux" || target.require["os"][0] == "freebsd" {
+		libs <- "-lm"
+	}
 	cflags := ["-I$${includedir}/kissfft"]
 	switch datatype {
 	case "float", "double":
@@ -95,7 +99,10 @@ onBuild ctx => {
 		cflags <- "-DFIXED_POINT=32"
 	case "simd":
 		cflags <- "-DUSE_SIMD"
-		cflags <- "-msse"
+		arch := target.require["arch"][0]
+		if arch == "amd64" || arch == "386" {
+			cflags <- "-msse"
+		}
 	}
 	if shared {
 		cflags <- "-DKISS_FFT_SHARED"
