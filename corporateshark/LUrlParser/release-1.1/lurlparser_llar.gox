@@ -1,8 +1,30 @@
 import (
 	"os"
 	"path/filepath"
-	"strings"
 )
+
+const consumerSource = `#include <iostream>
+
+#include "LUrlParser.h"
+
+int main() {
+    const auto URL = LUrlParser::ParseURL::parseURL("https://John:Dow@github.com:80/corporateshark/LUrlParser");
+
+    if (!URL.isValid()) {
+        return 1;
+    }
+
+    std::cout << "Scheme    : " << URL.scheme_ << std::endl;
+    std::cout << "Host      : " << URL.host_ << std::endl;
+    std::cout << "Port      : " << URL.port_ << std::endl;
+    std::cout << "Path      : " << URL.path_ << std::endl;
+    std::cout << "Query     : " << URL.query_ << std::endl;
+    std::cout << "Fragment  : " << URL.fragment_ << std::endl;
+    std::cout << "User name : " << URL.userName_ << std::endl;
+    std::cout << "Password  : " << URL.password_ << std::endl;
+    return 0;
+}
+`
 
 id "corporateshark/LUrlParser"
 
@@ -54,17 +76,16 @@ install(
 
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0755)!
-	dollar := "$"
-	pc := "prefix=" + dollar + "{pcfiledir}/../..\n" +
-		"exec_prefix=" + dollar + "{prefix}\n" +
-		"libdir=" + dollar + "{prefix}/lib\n" +
-		"includedir=" + dollar + "{prefix}/include\n\n" +
-		"Name: lurlparser\n" +
-		"Description: Lightweight URL & URI parser\n" +
-		"Version: 1.1\n" +
-		"Libs: -L" + dollar + "{libdir} -llurlparser\n" +
-		"Cflags: -I" + dollar + "{includedir}\n"
-	os.writeFile(filepath.join(pcDir, "lurlparser.pc"), []byte(pc), 0644)!
+	pc := pkgconfig.new(
+		name = "lurlparser",
+		description = "Lightweight URL & URI parser",
+		version = "release-1.1",
+		libs = ["-L$${libdir}", "-llurlparser"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "lurlparser.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("lurlparser")!
@@ -75,40 +96,14 @@ onTest ctx => {
 	testDir := filepath.join(ctx.SourceDir, "_llar_consumer")
 	os.mkdirAll(testDir, 0755)!
 
-	source := `#include <iostream>
-
-#include "LUrlParser.h"
-
-int main() {
-    const auto URL = LUrlParser::ParseURL::parseURL("https://John:Dow@github.com:80/corporateshark/LUrlParser");
-
-    if (!URL.isValid()) {
-        return 1;
-    }
-
-    std::cout << "Scheme    : " << URL.scheme_ << std::endl;
-    std::cout << "Host      : " << URL.host_ << std::endl;
-    std::cout << "Port      : " << URL.port_ << std::endl;
-    std::cout << "Path      : " << URL.path_ << std::endl;
-    std::cout << "Query     : " << URL.query_ << std::endl;
-    std::cout << "Fragment  : " << URL.fragment_ << std::endl;
-    std::cout << "User name : " << URL.userName_ << std::endl;
-    std::cout << "Password  : " << URL.password_ << std::endl;
-    return 0;
-}
-	`
 	sourcePath := filepath.join(testDir, "consumer.cpp")
-	os.writeFile(sourcePath, []byte(source), 0644)!
+	os.writeFile(sourcePath, []byte(consumerSource), 0644)!
+
+	pkgconfig.use installDir
+	flagsFile := filepath.join(testDir, "lurlparser.flags")
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("lurlparser")!), 0644)!
 
 	binary := filepath.join(testDir, "consumer")
-	pkgconfig.use installDir
-	flags := strings.fields(pkgconfig.lookup("lurlparser")!)
-	args := []string{sourcePath, "-std=c++11"}
-	args <- flags...
-	args <- "-o", binary
-
-	exec "c++", args...
-	lastErr!
-	exec binary
-	lastErr!
+	exec! "c++", "-std=c++11", sourcePath, "-o", binary, "@"+flagsFile
+	exec! binary
 }
