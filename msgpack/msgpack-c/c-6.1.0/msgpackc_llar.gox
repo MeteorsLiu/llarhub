@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 const consumerSource = `#include <msgpack.h>
@@ -84,17 +83,21 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE_1_0.txt"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE_1_0.txt"))!, 0o644)!
 
-	// Upstream writes prefix from CMAKE_INSTALL_PREFIX. Keep its flags and
-	// publish relocatable pkg-config metadata under Conan's msgpack name.
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
-	pcPath := filepath.join(pcDir, "msgpack-c.pc")
-	pc := string(os.readFile(pcPath)!)
-	pc = strings.replace(pc, "prefix="+installDir, "prefix=$${pcfiledir}/../..", 1)
-	pc = strings.replace(pc, "exec_prefix="+installDir, "exec_prefix=$${prefix}", 1)
-	pc = strings.replace(pc, "libdir="+filepath.join(installDir, "lib"), "libdir=$${prefix}/lib", 1)
-	pc = strings.replace(pc, "includedir="+filepath.join(installDir, "include"), "includedir=$${prefix}/include", 1)
-	os.writeFile(pcPath, []byte(pc), 0o644)!
-	os.writeFile(filepath.join(pcDir, "msgpack.pc"), []byte(pc), 0o644)!
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "msgpack",
+		description = "Binary-based efficient object serialization library",
+		version = "c-6.1.0",
+		libs = ["-L$${libdir}", "-lmsgpack-c"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "msgpack.pc"))!
+	pc.writeTo(out)!
+	out.close()!
+	out = os.create(filepath.join(pcDir, "msgpack-c.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("msgpack")!
