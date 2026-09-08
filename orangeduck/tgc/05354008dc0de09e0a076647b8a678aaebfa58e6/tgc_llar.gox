@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
 )
 
 const consumerSource = `#include <tgc.h>
@@ -54,16 +53,13 @@ onBuild ctx => {
 	cmakeLists := ctx.Proj.readFile("05354008dc0de09e0a076647b8a678aaebfa58e6/CMakeLists.txt")!
 	os.writeFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"), cmakeLists, 0o644)!
 
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "TGC_SRC_DIR", ctx.SourceDir
-	// Keep the installed library directory stable across platforms; GNUInstallDirs
-	// otherwise selects lib64 on some 64-bit systems.
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
 	c.defineBool "BUILD_SHARED_LIBS", shared
 	if !shared {
-		// The Conan recipe enables PIC for static builds only.
 		c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
 	}
 	c.configure
@@ -74,21 +70,18 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE.md"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE.md"))!, 0o644)!
 
-	// The upstream commit has no build files or pkg-config metadata, so this
-	// formula supplies the install recipe and a relocatable consumer interface.
-	pkgconfigDir := filepath.join(installDir, "lib", "pkgconfig")
-	os.mkdirAll(pkgconfigDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-includedir=$${prefix}/include
-libdir=$${prefix}/lib
-
-Name: tgc
-Description: Tiny garbage collector for C
-Version: 0.1.0
-Cflags: -I$${includedir}
-Libs: -L$${libdir} -ltgc
-`
-	os.writeFile(filepath.join(pkgconfigDir, "tgc.pc"), []byte(pc), 0o644)!
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "tgc",
+		description = "Tiny garbage collector for C",
+		version = "05354008dc0de09e0a076647b8a678aaebfa58e6",
+		libs = ["-L$${libdir}", "-ltgc"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "tgc.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("tgc")!
@@ -105,14 +98,11 @@ onTest ctx => {
 	binary := filepath.join(testDir, "consumer")
 
 	pkgconfig.use installDir
-	flags := pkgconfig.lookup("tgc")!.fields
-	args := []string{consumer}
-	args <- flags...
-	args <- "-o", binary
-	cc! args...
+	flagsFile := filepath.join(testDir, "tgc.flags")
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("tgc")!), 0o644)!
+	cc! consumer, "-o", binary, "@"+flagsFile
 
-	shared := slices.contains(target.options["shared"], "ON")
-	if shared {
+	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	}
