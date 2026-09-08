@@ -1,8 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 )
 
 const cConsumerSource = `#include <cqrlib.h>
@@ -52,11 +50,12 @@ onBuild ctx => {
 	cmakeLists := ctx.Proj.readFile("CQRlib-1.0.4/CMakeLists.txt")!
 	os.writeFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"), cmakeLists, 0o644)!
 
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CQRLIB_SRC_DIR", ctx.SourceDir
+	c.define "CMAKE_INSTALL_LIBDIR", "lib"
 	c.defineBool "BUILD_SHARED_LIBS", shared
 	c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
 	c.configure
@@ -67,37 +66,24 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "lgpl.txt"), os.readFile(filepath.join(ctx.SourceDir, "lgpl.txt"))!, 0o644)!
 
-	libs := []string{"-L$${libdir}", "-lCQRlib"}
-	if slices.contains(target.require["os"], "linux") || slices.contains(target.require["os"], "freebsd") {
+	libs := ["-L$${libdir}", "-lCQRlib"]
+	osName := target.require["os"][0]
+	if osName == "linux" || osName == "freebsd" {
 		libs <- "-lm"
 	}
 
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	version := ""
-	makefile := string(os.readFile(filepath.join(ctx.SourceDir, "Makefile"))!)
-	for line in makefile.split("\n") {
-		parts := line.splitN("=", 2)
-		if parts.len == 2 && strings.trimSpace(parts[0]) == "RELEASE" {
-			version = strings.trimSpace(parts[1])
-			break
-		}
-	}
-	if version == "" {
-		panic "CQRlib Makefile has no RELEASE"
-	}
-	pc := `prefix=$${pcfiledir}/../..
-exec_prefix=$${prefix}
-libdir=$${prefix}/lib
-includedir=$${prefix}/include
-
-Name: CQRlib
-Description: C quaternion rotation library
-Version: ` + version + `
-Libs: ` + strings.join(libs, " ") + `
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "cqrlib.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "cqrlib",
+		description = "C quaternion rotation library",
+		version = "CQRlib-1.0.4",
+		libs = libs,
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "cqrlib.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("cqrlib")!
@@ -110,26 +96,23 @@ onTest ctx => {
 
 	cSource := filepath.join(testDir, "consumer.c")
 	os.writeFile(cSource, []byte(cConsumerSource), 0o644)!
-	cBinary := filepath.join(testDir, "consumer-c")
-	pkgconfig.use installDir
-	flags := strings.fields(pkgconfig.lookup("cqrlib")!)
-	cArgs := []string{cSource}
-	cArgs <- flags...
-	cArgs <- "-o", cBinary
-	cc! cArgs...
-
 	cppSource := filepath.join(testDir, "consumer.cpp")
 	os.writeFile(cppSource, []byte(cppConsumerSource), 0o644)!
-	cppBinary := filepath.join(testDir, "consumer-cpp")
-	cppArgs := []string{cppSource}
-	cppArgs <- flags...
-	cppArgs <- "-o", cppBinary
-	exec! "c++", cppArgs...
 
-	if slices.contains(target.options["shared"], "ON") {
+	pkgconfig.use installDir
+	flagsFile := filepath.join(testDir, "cqrlib.flags")
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("cqrlib")!), 0o644)!
+
+	cBinary := filepath.join(testDir, "consumer-c")
+	cc! cSource, "-o", cBinary, "@"+flagsFile
+
+	cppBinary := filepath.join(testDir, "consumer-cpp")
+	exec! "c++", cppSource, "-o", cppBinary, "@"+flagsFile
+
+	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
-		if slices.contains(target.require["os"], "windows") {
+		if target.require["os"][0] == "windows" {
 			path := os.getenv("PATH")
 			os.setenv("PATH", filepath.join(installDir, "bin")+";"+path)!
 		}
