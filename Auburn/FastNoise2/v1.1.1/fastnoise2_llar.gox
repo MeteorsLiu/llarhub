@@ -58,6 +58,7 @@ onBuild ctx => {
 	}
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
+	c.buildType "Release"
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
 	c.define "CMAKE_CXX_STANDARD", "17"
 	c.defineBool "BUILD_SHARED_LIBS", shared
@@ -66,6 +67,49 @@ onBuild ctx => {
 	c.defineBool "FASTNOISE2_TESTS", false
 	c.defineBool "FASTNOISE2_UTILITY", false
 	c.configure
+
+	// FastSIMD NEON Cast() falls through to an implicit uint32x4_t → i32x4
+	// conversion that GCC rejects. Patch the fetched header before compile.
+	neon := filepath.join(ctx.SourceDir, "_build", "_deps", "fastsimd-src", "include", "FastSIMD", "ToolSet", "ARM", "NEON.h")
+	if _, err := os.stat(neon); err == nil {
+		neonSrc := string(os.readFile(neon)!)
+		oldCast := `        else
+        {
+            return a.GetNative();
+        }`
+		newCast := `        else if constexpr(
+            std::is_same_v<typename Register<T, 4, SIMD>::NativeType, uint32x4_t> &&
+            std::is_same_v<typename Register<U, 4, SIMD>::NativeType, int32x4_t> )
+        {
+            return vreinterpretq_s32_u32( a.GetNative() );
+        }
+        else if constexpr(
+            std::is_same_v<typename Register<T, 4, SIMD>::NativeType, int32x4_t> &&
+            std::is_same_v<typename Register<U, 4, SIMD>::NativeType, uint32x4_t> )
+        {
+            return vreinterpretq_u32_s32( a.GetNative() );
+        }
+        else if constexpr(
+            std::is_same_v<typename Register<T, 4, SIMD>::NativeType, uint32x4_t> &&
+            std::is_same_v<typename Register<U, 4, SIMD>::NativeType, float32x4_t> )
+        {
+            return vreinterpretq_f32_u32( a.GetNative() );
+        }
+        else if constexpr(
+            std::is_same_v<typename Register<T, 4, SIMD>::NativeType, float32x4_t> &&
+            std::is_same_v<typename Register<U, 4, SIMD>::NativeType, uint32x4_t> )
+        {
+            return vreinterpretq_u32_f32( a.GetNative() );
+        }
+        else
+        {
+            return a.GetNative();
+        }`
+		if neonSrc.contains(oldCast) {
+			os.writeFile(neon, []byte(strings.replace(neonSrc, oldCast, newCast, 1)), 0o644)!
+		}
+	}
+
 	c.build
 	c.install
 
@@ -92,6 +136,8 @@ onBuild ctx => {
 	libs := ["-L$${libdir}", "-l"+libName]
 	if slices.contains(target.require["os"], "linux") {
 		libs <- "-lm"
+		libs <- "-lpthread"
+		libs <- "-lstdc++"
 	}
 
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
