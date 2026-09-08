@@ -2,7 +2,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 )
 
 const consumerSource = `#include <kiss_fft.h>
@@ -53,10 +52,10 @@ filter => {
 
 onBuild ctx => {
 	installDir := ctx.outputDir
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
-	openmp := slices.contains(target.options["openmp"], "ON")
-	useAlloca := slices.contains(target.options["use_alloca"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
+	openmp := target.options["openmp"][0] == "ON"
+	useAlloca := target.options["use_alloca"][0] == "ON"
 	datatype := target.options["datatype"][0]
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
@@ -64,7 +63,7 @@ onBuild ctx => {
 	c.define "CMAKE_INSTALL_INCLUDEDIR", "include"
 	c.define "KISSFFT_DATATYPE", datatype
 	c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
-	c.defineBool "KISSFFT_PKGCONFIG", true
+	c.defineBool "KISSFFT_PKGCONFIG", false
 	c.defineBool "KISSFFT_STATIC", !shared
 	c.defineBool "KISSFFT_TEST", false
 	c.defineBool "KISSFFT_TOOLS", false
@@ -79,16 +78,48 @@ onBuild ctx => {
 	os.writeFile(filepath.join(licenseDir, "COPYING"), os.readFile(filepath.join(ctx.SourceDir, "COPYING"))!, 0o644)!
 
 	pcName := "kissfft-" + datatype
+	libName := "kissfft-" + datatype
 	if openmp {
 		pcName += "-openmp"
+		libName += "-openmp"
 	}
 
-	// CMake writes prefix from CMAKE_INSTALL_PREFIX. Keep the generated
-	// flags and make the installed file relocatable.
-	pcPath := filepath.join(installDir, "lib", "pkgconfig", pcName+".pc")
-	pc := string(os.readFile(pcPath)!)
-	pc = strings.replace(pc, "prefix="+installDir, "prefix=$${pcfiledir}/../..", 1)
-	os.writeFile(pcPath, []byte(pc), 0o644)!
+	libs := ["-L$${libdir}", "-l"+libName]
+	cflags := ["-I$${includedir}/kissfft"]
+	switch datatype {
+	case "float", "double":
+		cflags <- "-Dkiss_fft_scalar=" + datatype
+	case "int16_t":
+		cflags <- "-DFIXED_POINT=16"
+	case "int32_t":
+		cflags <- "-DFIXED_POINT=32"
+	case "simd":
+		cflags <- "-DUSE_SIMD"
+		cflags <- "-msse"
+	}
+	if shared {
+		cflags <- "-DKISS_FFT_SHARED"
+	}
+	if useAlloca {
+		cflags <- "-DKISS_FFT_USE_ALLOCA"
+	}
+	if openmp {
+		libs <- "-fopenmp"
+		cflags <- "-fopenmp"
+	}
+
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = pcName,
+		description = "A Fast Fourier Transform (FFT) library that tries to Keep it Simple, Stupid",
+		version = "131.1.0",
+		libs = libs,
+		cflags = cflags,
+	)!
+	out := os.create(filepath.join(pcDir, pcName+".pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup(pcName)!
@@ -103,7 +134,7 @@ onTest ctx => {
 	os.writeFile(consumer, []byte(consumerSource), 0o644)!
 
 	pcName := "kissfft-" + target.options["datatype"][0]
-	if slices.contains(target.options["openmp"], "ON") {
+	if target.options["openmp"][0] == "ON" {
 		pcName += "-openmp"
 	}
 
@@ -112,9 +143,9 @@ onTest ctx => {
 	os.writeFile(flagsFile, []byte(pkgconfig.lookup(pcName)!), 0o644)!
 
 	binary := filepath.join(testDir, "consumer")
-	cc! consumer, "-o", binary, "@"+flagsFile
+	cc! consumer, "@"+flagsFile, "-o", binary
 
-	if slices.contains(target.options["shared"], "ON") {
+	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	}
