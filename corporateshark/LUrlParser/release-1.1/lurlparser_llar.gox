@@ -1,6 +1,8 @@
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 )
 
 const consumerSource = `#include <iostream>
@@ -100,8 +102,20 @@ onTest ctx => {
 	os.writeFile(sourcePath, []byte(consumerSource), 0644)!
 
 	pkgconfig.use installDir
+	flags := pkgconfig.lookup("lurlparser")!
+	if slices.contains(target.require["os"], "linux") || slices.contains(target.require["os"], "freebsd") {
+		found := false
+		for field in strings.fields(flags) {
+			if field == "-lm" {
+				found = true
+			}
+		}
+		if !found {
+			panic "pkg-config flags missing Conan system lib -lm: ${flags}"
+		}
+	}
 	flagsFile := filepath.join(testDir, "lurlparser.flags")
-	os.writeFile(flagsFile, []byte(pkgconfig.lookup("lurlparser")!), 0644)!
+	os.writeFile(flagsFile, []byte(flags), 0644)!
 
 	binary := filepath.join(testDir, "consumer")
 	exec! "c++", "-std=c++11", sourcePath, "-o", binary, "@"+flagsFile

@@ -1,6 +1,8 @@
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 )
 
 const consumerSource = `#include "atomic_ops_stack.h"
@@ -139,6 +141,17 @@ onTest ctx => {
 
 	pkgconfig.use installDir
 	flags := pkgconfig.lookup("atomic_ops")!
+	if slices.contains(target.require["os"], "linux") || slices.contains(target.require["os"], "freebsd") {
+		found := false
+		for field in strings.fields(flags) {
+			if field == "-lpthread" {
+				found = true
+			}
+		}
+		if !found {
+			panic "pkg-config flags missing Conan system lib -lpthread: ${flags}"
+		}
+	}
 	flagsFile := filepath.join(testDir, "atomic_ops.flags")
 	os.writeFile(flagsFile, []byte(flags), 0o644)!
 

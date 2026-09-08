@@ -60,12 +60,11 @@ onTest ctx => {
 	// Build the consumer in a tree independent of the onBuild scratch tree so
 	// the test also runs on a cache hit, where onBuild is skipped.
 	testDir := ctx.SourceDir + "/_llar_consumer"
-	testBuild := testDir + "/_build"
 
-	// The consumer mirrors the Conan test_package: include <json-c/json.h>,
-	// link against json-c via its installed CMake package, then build a small
-	// JSON object to confirm the installed headers and library are usable.
-	source := `#include <json-c/json.h>
+	// Conan includedirs are include plus include/json-c, so consumers may
+	// write #include <json.h>. Using only <json-c/json.h> hides a missing
+	// -I${includedir}/json-c on the published .pc.
+	source := `#include <json.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -83,18 +82,12 @@ int main(void) {
 	os.mkdirAll(testDir, 0755)!
 	os.writeFile(testDir+"/consumer.c", []byte(source), 0644)!
 
-	cmakeLists := `cmake_minimum_required(VERSION 3.15)
-project(json_c_consumer LANGUAGES C)
-find_package(json-c REQUIRED CONFIG)
-add_executable(consumer consumer.c)
-target_link_libraries(consumer PRIVATE json-c::json-c)
-`
-	os.writeFile(testDir+"/CMakeLists.txt", []byte(cmakeLists), 0644)!
+	pkgconfig.use installDir
+	flags := pkgconfig.lookup("json-c")!
+	flagsFile := testDir + "/json-c.flags"
+	os.writeFile(flagsFile, []byte(flags), 0644)!
 
-	tc := cmake.new(testDir, testBuild, "")
-	tc.use installDir
-	tc.configure
-	tc.build
-
-	exec! testBuild + "/consumer"
+	binary := testDir + "/consumer"
+	cc! testDir+"/consumer.c", "-o", binary, "@"+flagsFile
+	exec! binary
 }

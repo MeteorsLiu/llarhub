@@ -1,6 +1,8 @@
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 )
 
 const consumerSource = `#include <meshoptimizer.h>
@@ -89,8 +91,20 @@ onTest ctx => {
 	os.writeFile(consumer, []byte(consumerSource), 0o644)!
 
 	pkgconfig.use installDir
+	flags := pkgconfig.lookup("meshoptimizer")!
+	if target.options["shared"][0] != "ON" && slices.contains(target.require["os"], "linux") {
+		found := false
+		for field in strings.fields(flags) {
+			if field == "-lstdc++" || field == "-lc++" {
+				found = true
+			}
+		}
+		if !found {
+			panic "pkg-config flags missing Conan static C++ runtime -lstdc++: ${flags}"
+		}
+	}
 	flagsFile := filepath.join(testDir, "meshoptimizer.flags")
-	os.writeFile(flagsFile, []byte(pkgconfig.lookup("meshoptimizer")!), 0o644)!
+	os.writeFile(flagsFile, []byte(flags), 0o644)!
 
 	binary := filepath.join(testDir, "consumer")
 	exec! "c++", consumer, "-o", binary, "@"+flagsFile

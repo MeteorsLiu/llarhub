@@ -1,6 +1,7 @@
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -108,6 +109,24 @@ onTest ctx => {
 
 	pkgconfig.use installDir
 	flags := pkgconfig.lookup("libde265")!
+	if slices.contains(target.require["os"], "linux") || slices.contains(target.require["os"], "freebsd") {
+		foundPthread := false
+		foundM := false
+		for field in strings.fields(flags) {
+			if field == "-lpthread" {
+				foundPthread = true
+			}
+			if field == "-lm" {
+				foundM = true
+			}
+		}
+		if !foundPthread {
+			panic "pkg-config flags missing Conan system lib -lpthread: ${flags}"
+		}
+		if !foundM {
+			panic "pkg-config flags missing Conan system lib -lm: ${flags}"
+		}
+	}
 	flagsFile := filepath.join(testDir, "libde265.flags")
 	os.writeFile(flagsFile, []byte(flags), 0o644)!
 

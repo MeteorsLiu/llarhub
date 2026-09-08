@@ -106,6 +106,15 @@ onTest ctx => {
 
 	pkgconfig.use installDir
 	flags := pkgconfig.lookup("streamvbyte")!
+	found := false
+	for field in strings.fields(flags) {
+		if field == "-lstreamvbyte" {
+			found = true
+		}
+	}
+	if !found {
+		panic "pkg-config flags missing Conan library -lstreamvbyte: ${flags}"
+	}
 	flagsFile := filepath.join(testDir, "streamvbyte.flags")
 	os.writeFile(flagsFile, []byte(flags), 0o644)!
 

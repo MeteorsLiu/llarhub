@@ -1,6 +1,7 @@
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -91,6 +92,17 @@ onTest ctx => {
 	// hits where onBuild is skipped.
 	pkgconfig.use installDir
 	flags := pkgconfig.lookup("chaiscript")!
+	if slices.contains(target.require["os"], "linux") || slices.contains(target.require["os"], "freebsd") {
+		foundM := false
+		for field in strings.fields(flags) {
+			if field == "-lm" {
+				foundM = true
+			}
+		}
+		if !foundM {
+			panic "pkg-config flags missing Conan system lib -lm: ${flags}"
+		}
+	}
 	flagsFile := filepath.join(testDir, "chaiscript.flags")
 	os.writeFile(flagsFile, []byte(flags), 0o644)!
 
