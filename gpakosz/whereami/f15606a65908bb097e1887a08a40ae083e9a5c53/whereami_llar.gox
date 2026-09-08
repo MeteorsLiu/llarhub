@@ -1,8 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 )
 
 const consumerSource = `#include <whereami.h>
@@ -66,8 +64,8 @@ onBuild ctx => {
 	cMakeLists := ctx.Proj.readFile("f15606a65908bb097e1887a08a40ae083e9a5c53/CMakeLists.txt")!
 	os.writeFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"), cMakeLists, 0o644)!
 
-	shared := slices.contains(target.options["shared"], "ON")
-	fPIC := slices.contains(target.options["fPIC"], "ON")
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
 	c.defineBool "BUILD_SHARED_LIBS", shared
@@ -85,17 +83,16 @@ onBuild ctx => {
 
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
-	pc := `prefix=$${pcfiledir}/../..
-includedir=$${prefix}/include
-libdir=$${prefix}/lib
-
-Name: whereami
-Description: A drop-in two files library to locate the current executable and the current module on the file system
-Version: f15606a65908bb097e1887a08a40ae083e9a5c53
-Libs: -L$${libdir} -lwhereami
-Cflags: -I$${includedir}
-`
-	os.writeFile(filepath.join(pcDir, "whereami.pc"), []byte(pc), 0o644)!
+	pc := pkgconfig.new(
+		name = "whereami",
+		description = "A drop-in two files library to locate the current executable and the current module on the file system",
+		version = "f15606a65908bb097e1887a08a40ae083e9a5c53",
+		libs = ["-L$${libdir}", "-lwhereami"],
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "whereami.pc"))!
+	pc.writeTo(out)!
+	out.close()!
 
 	pkgconfig.use installDir
 	ctx.setMetadata pkgconfig.lookup("whereami")!
@@ -103,21 +100,21 @@ Cflags: -I$${includedir}
 
 onTest ctx => {
 	installDir := ctx.outputDir
-	testDir := os.mkdirTemp("", "whereami-consumer-")!
-	defer os.removeAll(testDir)
-	testSource := filepath.join(testDir, "consumer.c")
-	binary := filepath.join(testDir, "consumer")
-	os.writeFile(testSource, []byte(consumerSource), 0o644)!
+	testDir := filepath.join(ctx.SourceDir, "_llar_consumer")
+	os.mkdirAll(testDir, 0o755)!
+
+	consumer := filepath.join(testDir, "consumer.c")
+	os.writeFile(consumer, []byte(consumerSource), 0o644)!
 
 	pkgconfig.use installDir
-	args := []string{testSource}
-	args <- strings.fields(pkgconfig.lookup("whereami")!)...
-	args <- "-o", binary
-	cc! args...
+	flags := pkgconfig.lookup("whereami")!
+	flagsFile := filepath.join(testDir, "whereami.flags")
+	os.writeFile(flagsFile, []byte(flags), 0o644)!
 
-	if slices.contains(target.options["shared"], "ON") {
-		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
-		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
-	}
+	binary := filepath.join(testDir, "consumer")
+	cc! consumer, "@"+flagsFile, "-o", binary
+
+	os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
+	os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	exec! binary
 }
