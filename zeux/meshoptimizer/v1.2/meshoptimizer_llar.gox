@@ -85,11 +85,24 @@ onBuild ctx => {
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
 
+	libs := ["-L$${libdir}", "-lmeshoptimizer"]
+	if !shared {
+		osName := target.require["os"][0]
+		if osName == "darwin" {
+			libs <- "-lc++"
+		} else {
+			libs <- "-lstdc++"
+		}
+		if osName == "linux" || osName == "freebsd" {
+			libs <- "-lm"
+		}
+	}
+
 	pc := pkgconfig.new(
 		name = "meshoptimizer",
 		description = "Mesh optimization library that makes meshes smaller and faster to render",
 		version = "v1.2",
-		libs = ["-L$${libdir}", "-lmeshoptimizer"],
+		libs = libs,
 		cflags = ["-I$${includedir}"],
 	)!
 
