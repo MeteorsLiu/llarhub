@@ -1,0 +1,54 @@
+import (
+	"os"
+	"path/filepath"
+)
+
+id "bblanchon/ArduinoJson"
+
+fromVer "v6.15.2"
+
+onBuild ctx => {
+	installDir := ctx.outputDir
+	includeDir := filepath.join(installDir, "include")
+	sourceDir := filepath.join(ctx.SourceDir, "src")
+
+	filepath.walkDir(sourceDir, (path, entry, err) => {
+		if err != nil {
+			return err
+		}
+		if entry.isDir || (!entry.name.hasSuffix(".h") && !entry.name.hasSuffix(".hpp")) {
+			return nil
+		}
+
+		relativePath := filepath.rel(sourceDir, path)!
+		destination := filepath.join(includeDir, relativePath)
+		os.mkdirAll(filepath.dir(destination), 0o755)!
+		os.writeFile(destination, os.readFile(path)!, 0o644)!
+		return nil
+	})!
+
+	licenseDir := filepath.join(installDir, "licenses")
+	os.mkdirAll(licenseDir, 0o755)!
+	for path in filepath.glob(filepath.join(ctx.SourceDir, "LICENSE*"))! {
+		destination := filepath.join(licenseDir, filepath.base(path))
+		os.writeFile(destination, os.readFile(path)!, 0o644)!
+	}
+
+	ctx.setMetadata "-I" + includeDir
+}
+
+onTest ctx => {
+	installDir := ctx.outputDir
+	includeDir := filepath.join(installDir, "include")
+	testDir := filepath.join(ctx.SourceDir, "_llar_consumer")
+	os.mkdirAll(testDir, 0o755)!
+
+	consumer := filepath.join(testDir, "consumer.cpp")
+	os.writeFile(consumer, ctx.Proj.readFile("v6.15.2/consumer.cpp")!, 0o644)!
+	flagsFile := filepath.join(testDir, "arduinojson.flags")
+	os.writeFile(flagsFile, []byte("-I"+includeDir), 0o644)!
+
+	binary := filepath.join(testDir, "consumer")
+	exec! "c++", consumer, "@"+flagsFile, "-o", binary
+	exec! binary
+}
