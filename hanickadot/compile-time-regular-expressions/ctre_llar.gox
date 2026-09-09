@@ -1,0 +1,107 @@
+import (
+	"os"
+	"path/filepath"
+)
+
+const consumerSource = `#include <ctre.hpp>
+#include <iostream>
+#include <string_view>
+
+static constexpr auto match_pattern = ctll::fixed_string{ "[a-z]+([0-9]+)" };
+static constexpr auto search_pattern = ctll::fixed_string{ "([a-z]+)([0-9]+)" };
+static constexpr auto starts_pattern = ctll::fixed_string{ "prefix" };
+
+int main() {
+    using namespace std::literals;
+    constexpr std::string_view text = "prefix abc123 suffix";
+
+    auto matched = ctre::match<match_pattern>("abc123"sv);
+    if (!matched || matched.get<1>().to_view() != "123"sv) {
+        return 1;
+    }
+
+    auto searched = ctre::search<search_pattern>(text);
+    if (!searched || searched.get<2>().to_view() != "123"sv) {
+        return 2;
+    }
+
+    auto prefixed = ctre::starts_with<starts_pattern>(text);
+    if (!prefixed) {
+        return 3;
+    }
+
+    std::cout << "ctre consumer passed\n";
+    return 0;
+}
+`
+
+id "hanickadot/compile-time-regular-expressions"
+
+fromVer "v3.9.0"
+
+onBuild ctx => {
+	installDir := ctx.outputDir
+
+	// v3.9.0 uses a redundant template keyword for a non-dependent call;
+	// AppleClang 21 rejects it while v3.10.0 and newer already use the
+	// corrected spelling. The exact replacement is a no-op for newer tags.
+	wrapperPath := filepath.join(ctx.SourceDir, "include", "ctre", "wrapper.hpp")
+	wrapper := string(os.readFile(wrapperPath)!)
+	wrapper = wrapper.replace("return Method::template exec();", "return Method::exec();", 1)
+	os.writeFile(wrapperPath, []byte(wrapper), 0o644)!
+
+	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
+	c.buildType "Release"
+	c.defineBool "CTRE_BUILD_TESTS", false
+	c.defineBool "CTRE_BUILD_PACKAGE", false
+	c.configure
+	c.build
+	c.install
+
+	// Match Conan's package(): only headers and the license are part of the
+	// installed package. The CMake config is not exported by package_info().
+	os.removeAll(filepath.join(installDir, "share", "cmake"))!
+	os.removeAll(filepath.join(installDir, "lib", "cmake"))!
+	licenseDir := filepath.join(installDir, "licenses")
+	os.mkdirAll(licenseDir, 0o755)!
+	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
+
+	// Conan removes the upstream pkg-config directory because ctre is
+	// header-only. LLAR still needs relocatable metadata for consumers.
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "ctre",
+		description = "Compile Time Regular Expression",
+		// The Conan package has no published pkg-config version; use the
+		// formula floor for this LLAR-only relocatable metadata.
+		version = "v3.9.0",
+		URL = "https://github.com/hanickadot/compile-time-regular-expressions",
+		cflags = ["-I$${includedir}"],
+	)!
+	pcFile := os.create(filepath.join(pcDir, "ctre.pc"))!
+	pc.writeTo(pcFile)!
+	pcFile.close()!
+
+	pkgconfig.use installDir
+	ctx.setMetadata pkgconfig.lookup("ctre")!
+}
+
+onTest ctx => {
+	installDir := ctx.outputDir
+	testDir := filepath.join(ctx.SourceDir, "_llar_consumer")
+	os.mkdirAll(testDir, 0o755)!
+
+	consumer := filepath.join(testDir, "consumer.cpp")
+	os.writeFile(consumer, []byte(consumerSource), 0o644)!
+
+	// Re-query the installed package so a cache-hit test does not depend on
+	// onBuild's metadata or scratch build directory.
+	pkgconfig.use installDir
+	flagsFile := filepath.join(testDir, "ctre.flags")
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("ctre")!), 0o644)!
+
+	binary := filepath.join(testDir, "consumer")
+	exec! "c++", "-std=c++17", consumer, "-o", binary, "@"+flagsFile
+	exec! binary
+}
