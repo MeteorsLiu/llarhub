@@ -1,0 +1,78 @@
+import (
+	"os"
+	"path/filepath"
+)
+
+const consumerSource = `#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#include <doctest/doctest.h>
+
+TEST_CASE("testing the factorial function") {
+    CHECK(1 == 1);
+}
+`
+
+id "onqtam/doctest"
+
+fromVer "2.3.3"
+
+onBuild ctx => {
+	installDir := ctx.outputDir
+
+	includeDir := filepath.join(installDir, "include", "doctest")
+	os.mkdirAll(includeDir, 0o755)!
+	os.writeFile(
+		filepath.join(includeDir, "doctest.h"),
+		os.readFile(filepath.join(ctx.SourceDir, "doctest", "doctest.h"))!,
+		0o644,
+	)!
+
+	cmakeDir := filepath.join(installDir, "lib", "cmake")
+	os.mkdirAll(cmakeDir, 0o755)!
+	for name in ["doctest.cmake", "doctestAddTests.cmake"] {
+		os.writeFile(
+			filepath.join(cmakeDir, name),
+			os.readFile(filepath.join(ctx.SourceDir, "scripts", "cmake", name))!,
+			0o644,
+		)!
+	}
+
+	licenseDir := filepath.join(installDir, "licenses")
+	os.mkdirAll(licenseDir, 0o755)!
+	os.writeFile(
+		filepath.join(licenseDir, "LICENSE.txt"),
+		os.readFile(filepath.join(ctx.SourceDir, "LICENSE.txt"))!,
+		0o644,
+	)!
+
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "doctest",
+		description = "C++11/14/17/20 single header testing framework",
+		version = "2.3.3",
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "doctest.pc"))!
+	pc.writeTo(out)!
+	out.close()!
+
+	pkgconfig.use installDir
+	ctx.setMetadata pkgconfig.lookup("doctest")!
+}
+
+onTest ctx => {
+	installDir := ctx.outputDir
+	testDir := filepath.join(ctx.SourceDir, "_llar_consumer")
+	os.mkdirAll(testDir, 0o755)!
+
+	consumer := filepath.join(testDir, "consumer.cpp")
+	os.writeFile(consumer, []byte(consumerSource), 0o644)!
+
+	pkgconfig.use installDir
+	flagsFile := filepath.join(testDir, "doctest.flags")
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("doctest")!), 0o644)!
+
+	binary := filepath.join(testDir, "consumer")
+	exec! "c++", "-std=c++11", consumer, "-o", binary, "@"+flagsFile
+	exec! binary
+}
