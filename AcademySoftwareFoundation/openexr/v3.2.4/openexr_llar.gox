@@ -1,0 +1,133 @@
+import (
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+)
+
+const consumerSource = `#include <ImfHeader.h>
+
+int main() {
+    Imf::Header header;
+    return header.screenWindowWidth() > 0 ? 0 : 1;
+}
+`
+
+id "AcademySoftwareFoundation/openexr"
+
+fromVer "v3.2.4"
+
+defaults {
+	"shared": "OFF",
+	"fPIC": "ON",
+}
+
+filter => {
+	for name, values in target.options {
+		if name != "shared" && name != "fPIC" {
+			return false
+		}
+		for value in values {
+			if value != "ON" && value != "OFF" {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+onRequire (proj, deps) => {
+	deps.require "AcademySoftwareFoundation/Imath", "v3.1.12"
+	deps.require "ebiggers/libdeflate", "v1.15"
+}
+
+onBuild ctx => {
+	installDir := ctx.outputDir
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
+
+	cmakeLists := filepath.join(ctx.SourceDir, "CMakeLists.txt")
+	source := string(os.readFile(cmakeLists)!)
+	source = strings.replace(source, "add_subdirectory(website/src)", "# add_subdirectory(website/src)", 1)
+	os.writeFile(cmakeLists, []byte(source), 0o644)!
+
+	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
+	c.define "CMAKE_INSTALL_LIBDIR", "lib"
+	c.defineBool "BUILD_SHARED_LIBS", shared
+	c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
+	c.defineBool "BUILD_TESTING", false
+	c.defineBool "BUILD_WEBSITE", false
+	c.defineBool "OPENEXR_BUILD_EXAMPLES", false
+	c.defineBool "OPENEXR_INSTALL_DOCS", false
+	c.defineBool "OPENEXR_INSTALL_PKG_CONFIG", true
+	dependencyDir := filepath.join(ctx.SourceDir, "_llar_deps")
+	os.mkdirAll(dependencyDir, 0o755)!
+	for dep in ctx.Proj.Deps {
+		dependencyRoot := filepath.join(dependencyDir, strings.replace(dep.Path, "/", "_", 1))
+		os.symlink(ctx.outputDir(dep), dependencyRoot)!
+		c.use dependencyRoot
+	}
+	c.configure
+	c.build
+	c.install
+
+	licenseDir := filepath.join(installDir, "licenses")
+	os.mkdirAll(licenseDir, 0o755)!
+	os.writeFile(filepath.join(licenseDir, "LICENSE.md"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE.md"))!, 0o644)!
+
+	pcPath := filepath.join(installDir, "lib", "pkgconfig", "OpenEXR.pc")
+	pcSource := string(os.readFile(pcPath)!)
+	pcSource = strings.replace(pcSource, "prefix="+installDir, "prefix=$${pcfiledir}/../..", 1)
+	lines := pcSource.split("\n")
+	privateRequires := false
+	for i in 0:lines.len {
+		if lines[i].hasPrefix("Requires.private:") {
+			privateRequires = true
+			lines[i] = "Requires: Imath, libdeflate"
+		}
+	}
+	if privateRequires {
+		for i in 0:lines.len {
+			if lines[i] == "Requires: Imath" {
+				lines[i] = ""
+			}
+		}
+	}
+	os.writeFile(pcPath, []byte(lines.join("\n")), 0o644)!
+
+	for dep in ctx.Proj.Deps {
+		pkgconfig.use ctx.outputDir(dep)
+	}
+	pkgconfig.use installDir
+	ctx.setMetadata pkgconfig.lookup("OpenEXR")!
+}
+
+onTest ctx => {
+	installDir := ctx.outputDir
+	testDir := filepath.join(ctx.SourceDir, "_llar_consumer")
+	os.mkdirAll(testDir, 0o755)!
+
+	consumer := filepath.join(testDir, "consumer.cpp")
+	os.writeFile(consumer, []byte(consumerSource), 0o644)!
+
+	for dep in ctx.Proj.Deps {
+		pkgconfig.use ctx.outputDir(dep)
+	}
+	pkgconfig.use installDir
+	flagsFile := filepath.join(testDir, "OpenEXR.flags")
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("OpenEXR")!), 0o644)!
+
+	binary := filepath.join(testDir, "consumer")
+	exec! "c++", "-std=c++17", consumer, "-o", binary, "@"+flagsFile
+
+	var libraryPaths = [filepath.join(installDir, "lib")]
+	for dep in ctx.Proj.Deps {
+		libraryPaths <- filepath.join(ctx.outputDir(dep), "lib")
+	}
+	pathSeparator := ":"
+	if slices.contains(target.require["os"], "windows") {
+		pathSeparator = ";"
+	}
+	libraryPath := libraryPaths.join(pathSeparator)
+	exec! {"LD_LIBRARY_PATH": libraryPath, "DYLD_LIBRARY_PATH": libraryPath}, binary
+}
