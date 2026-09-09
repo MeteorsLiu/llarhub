@@ -48,7 +48,18 @@ documentation as a substitute for that source.
 6. Perform an XGo style pass. Replace redundant setup, error checks, package
    qualifiers, and temporary collections with the simpler verified XGo/gsh
    form from the style reference.
-7. Compile through LLAR's actual ixgo path, then run the target repository's
+7. Write `onTest` so it covers the installed library, not a one-call smoke
+   test. Lookup every published `.pc` / component, include headers the way
+   consumers of the install tree write them, and call enough public API that
+   a missing archive, extra `-I`, or system lib fails at compile or link.
+   Do not string-match pkg-config output. Read [Formula Semantics](references/formula-semantics.md)
+   **Consumer Test**.
+8. After the Formula is written, if a Conan Center recipe exists, the author
+   (the AI writing the Formula) reads `recipes/<name>/all/conanfile.py` and
+   diffs `package_info()` against the published `.pc`. That comparison is a
+   review the author performs, not a script and not an `onTest` check. Read
+   [Formula Semantics](references/formula-semantics.md) **Conan Flag Audit**.
+9. Compile through LLAR's actual ixgo path, then run the target repository's
    Formula validation for exact and representative versions, options, and
    cache-hit tests required by the change.
 
@@ -111,6 +122,16 @@ LLAR's configured streams, working directory, and execution path.
   fragment, or a libs-only query, for the complete result.
 - Keep consumer tests independent of the build scratch tree so they can run on
   a cache hit.
+- After writing a C/C++ Formula, two reviews are required, and they are
+  different jobs. `onTest` covers the library: every published `.pc` /
+  component, the include forms consumers use, and enough of the public API
+  that a missing system lib, extra `-I`, or contrib archive fails compile or
+  link. A constructor / `version` / `free` smoke test is not coverage. If a
+  Conan Center recipe exists, the author then reads
+  `recipes/<name>/all/conanfile.py` and diffs `package_info()` against the
+  published `.pc`. The Conan diff is the author (AI) reading the recipe; do
+  not encode Conan tokens into `onTest` (`panic` if lookup lacks `-lm`,
+  require `-lglm` on a header-only install, and similar).
 - In `onBuild`, compile and install C/C++ packages only through the LLAR
   CMake or Autotools helper. Do not call `cc`, `c++`, `gcc`, `clang`, `ar`,
   `ld`, or equivalent compilers and archivers from `onBuild`. Naked compiler
@@ -164,7 +185,14 @@ At minimum, prove:
 - required command failure propagation;
 - installed headers, libraries, tools, or package metadata, including the
   installed `.pc` file and complete pkg-config lookup result when applicable;
+- consumer coverage of the installed public interface (every published
+  `.pc` / component, include forms, and APIs that actually pull the shipped
+  archives), not a smoke constructor;
+- when a Conan Center recipe exists: the author has read `package_info()`
+  and compared it to the published `.pc` (author review, not an `onTest`
+  string check);
 - consumer behavior after a fresh build and, when supported, a cache hit.
 
 Do not accept successful parsing or compilation as proof that the installed
-package is usable.
+package is usable. Do not accept a one-call smoke consumer as proof the
+library was tested. Do not treat pkg-config token matching as test coverage.

@@ -232,6 +232,38 @@ query to a header-only library even though its libs portion is empty.
 Do not copy a package manager's `package_info` declaration without comparing it
 to the actual installed result.
 
+## Conan Flag Audit
+
+This comparison is done by the **author** (the AI writing the Formula) after
+the Formula exists. It is not a test script, not CI string-matching, and not
+something `onTest` encodes as `panic` on lookup tokens.
+
+When a
+[Conan Center](https://github.com/conan-io/conan-center-index) recipe exists
+for the same package, read the live `recipes/<name>/all/conanfile.py` and
+diff `package_info()` against the published `.pc` `Libs`/`Cflags`. Fix the
+`.pc` when the review finds a real miss. Do not put Conan tokens into the
+consumer (`panic` if lookup lacks `-lm`, require `-lglm` while shipping
+header-only, and similar). Library coverage belongs in **Consumer Test**.
+
+Baseline: linux amd64 static Release, default options, plus every retained
+option that changes exported flags (`shared`, `nothreads`, components).
+
+| Conan `package_info()` | LLAR `.pc` |
+|---|---|
+| `cpp_info.libs` / component `libs` | `Libs:` `-l…` |
+| `system_libs` | extra `Libs:` `-l…` (linux typically `m`, `pthread`, `rt`, `anl`, `dl`) |
+| `defines` | `Cflags:` `-D…` |
+| extra `includedirs` beyond `include` | extra `Cflags:` `-I…` |
+| `pkg_config_name` / components | `.pc` filename, `Name:`, `Requires:` |
+
+Missing Conan exports are a Formula defect. Extra LLAR flags are not
+automatically wrong, but record them. Confirm the installed archive and
+headers exist.
+
+`pkgconfig.lookup` does not pass `--static`. Put unix system libs the consumer
+needs on public `Libs`, not only `Libs.private`.
+
 ## Consumer Test
 
 Base `onTest` on upstream or reference-package consumer behavior. Build against
@@ -242,6 +274,29 @@ When the Formula publishes pkg-config metadata, require the installed `.pc`
 file and compile/link the consumer with the complete flags returned by the
 verified cflags-and-libs lookup. A test that reconstructs `-I`, `-L`, or `-l`
 flags independently does not validate the published metadata.
+
+`onTest` must **cover the installed library**, not smoke one constructor and
+not assert Conan flag tokens. A green `new`/`free`/`version` consumer is how
+missing system libs, extra include dirs, contrib archives, and unused public
+headers escape CI. Align tests to the library, not to Conan.
+
+Cover:
+
+- Every published `.pc` / component / extra archive the Formula installs
+  (`libhwy` and `libhwy-contrib`, not only the primary name).
+- The include forms a real consumer would write from the installed tree
+  (`<json.h>` when headers also live in `include/json-c`;
+  `<libdxfrw/libdxfrw.h>` when headers live under `include/libdxfrw`).
+- Enough of the public API that the test pulls the objects a user would:
+  encode/decode, parse, evaluate, decode a frame, open a socket — not only
+  allocate a handle. Prefer the upstream `test_package` or examples as the
+  floor, then add the rest of the shipped interface they skip.
+- Compile/link with **only** `pkgconfig.lookup` flags. Do not add `-lm`,
+  `-lpthread`, `-lstdc++`, or extra `-I` on the test line.
+- Do not `panic` on lookup text. If a flag is missing, a thorough consumer
+  fails at compile or link. If it still would not, deepen the consumer.
+  Conan `package_info()` mismatches that a full-library test cannot see
+  belong in the author review, not in `onTest`.
 
 Use a test build tree distinct from the build callback's scratch tree. A cached
 artifact may skip the build callback while still running the consumer test.
