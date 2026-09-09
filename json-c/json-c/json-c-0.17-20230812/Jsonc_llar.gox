@@ -44,7 +44,7 @@ onBuild ctx => {
 		description = "JSON-C library",
 		version = "json-c-0.17-20230812",
 		libs = libs,
-		cflags = ["-I$${includedir}"],
+		cflags = ["-I$${includedir}", "-I$${includedir}/json-c"],
 	)!
 	out := os.create(filepath.join(pcDir, "json-c.pc"))!
 	pc.writeTo(out)!
