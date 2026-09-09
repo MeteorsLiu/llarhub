@@ -98,6 +98,12 @@ onBuild ctx => {
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
+	// thread_pool.h includes hwy/stats.h, but 1.4.0's HWY_SOURCES omits it so
+	// cmake does not install the header.
+	hwyInclude := filepath.join(installDir, "include", "hwy")
+	os.mkdirAll(hwyInclude, 0o755)!
+	os.writeFile(filepath.join(hwyInclude, "stats.h"), os.readFile(filepath.join(ctx.SourceDir, "hwy", "stats.h"))!, 0o644)!
+
 	linux := slices.contains(target.require["os"], "linux")
 	pcDir := filepath.join(installDir, "lib", "pkgconfig")
 	os.mkdirAll(pcDir, 0o755)!
@@ -126,12 +132,14 @@ onBuild ctx => {
 	contribLibs := ["-L$${libdir}", "-lhwy_contrib"]
 	if linux {
 		contribLibs <- "-lm"
+		contribLibs <- "-lpthread"
 	}
 	contribCflags := ["-I$${includedir}"]
 	contrib := pkgconfig.new(
 		name = "libhwy-contrib",
 		description = "Additions to Highway: dot product, image, math, sort",
 		version = "1.4.0",
+		requires = ["libhwy"],
 		libs = contribLibs,
 		cflags = contribCflags,
 	)!
