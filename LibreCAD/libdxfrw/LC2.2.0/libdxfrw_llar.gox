@@ -129,7 +129,7 @@ onBuild ctx => {
 		description = "DXF read/write library",
 		version = "LC2.2.0",
 		libs = libs,
-		cflags = ["-I$${includedir}/libdxfrw"],
+		cflags = ["-I$${includedir}", "-I$${includedir}/libdxfrw"],
 	)!
 	out := os.create(filepath.join(pcDir, "libdxfrw.pc"))!
 	pc.writeTo(out)!
