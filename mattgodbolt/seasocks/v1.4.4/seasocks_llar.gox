@@ -1,0 +1,101 @@
+import (
+	"os"
+	"path/filepath"
+)
+
+id "mattgodbolt/seasocks"
+
+fromVer "v1.4.4"
+
+defaults {
+	"shared": "OFF",
+	"fPIC": "ON",
+	"with_zlib": "ON",
+}
+
+filter => {
+	osName := target.require["os"][0]
+	return osName == "linux" || osName == "freebsd"
+}
+
+onRequire (proj, deps) => {
+	if target.options["with_zlib"][0] == "ON" {
+		deps.require "madler/zlib", "v1.3.1"
+	}
+}
+
+onBuild ctx => {
+	installDir := ctx.outputDir
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
+	withZlib := target.options["with_zlib"][0] == "ON"
+
+	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
+	for dep in ctx.Proj.Deps {
+		c.use ctx.outputDir(dep)
+	}
+	c.defineBool "SEASOCKS_SHARED", shared
+	c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
+	c.defineBool "DEFLATE_SUPPORT", withZlib
+	c.defineBool "SEASOCKS_EXAMPLE_APP", false
+	c.defineBool "UNITTESTS", false
+	c.configure
+	c.build
+	c.install
+
+	var requires []string
+	if withZlib {
+		requires = ["zlib"]
+	}
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "seasocks",
+		description = "A tiny embeddable C++ HTTP and WebSocket server",
+		version = "1.4.4",
+		requires = requires,
+		libs = ["-L$${libdir}", "-lseasocks", "-lpthread", "-lm"],
+		cflags = ["-I$${includedir}"],
+	)!
+	pcFile := os.create(filepath.join(pcDir, "seasocks.pc"))!
+	pc.writeTo(pcFile)!
+	pcFile.close()!
+
+	pkgconfig.use installDir
+	ctx.setMetadata pkgconfig.lookup("seasocks")!
+}
+
+onTest ctx => {
+	installDir := ctx.outputDir
+	testDir := filepath.join(ctx.SourceDir, "_llar_consumer")
+	os.mkdirAll(testDir, 0o755)!
+
+	source := filepath.join(testDir, "consumer.cpp")
+	os.writeFile(source, []byte(`
+#include "seasocks/Connection.h"
+#include "seasocks/PrintfLogger.h"
+#include "seasocks/Server.h"
+
+#include <memory>
+#include <thread>
+#include <unistd.h>
+
+int main() {
+    auto logger = std::make_shared<seasocks::PrintfLogger>();
+    seasocks::Server server(logger);
+    server.startListening(0);
+    std::thread serverThread([&] { server.loop(); });
+    sleep(1);
+    server.terminate();
+    serverThread.join();
+}
+`), 0o644)!
+
+	pkgconfig.use installDir
+	flags := pkgconfig.lookup("seasocks")!
+	flagsFile := filepath.join(testDir, "seasocks.flags")
+	os.writeFile(flagsFile, []byte(flags), 0o644)!
+	binary := filepath.join(testDir, "consumer")
+	exec! "c++", "-std=c++17", source, "-o", binary, "@"+flagsFile
+	exec! {"LD_LIBRARY_PATH": filepath.join(installDir, "lib")}, binary
+}
