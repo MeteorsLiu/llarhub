@@ -1,0 +1,129 @@
+import (
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+)
+
+const consumerSource = `#include <hunspell/hunspell.h>
+#include <stddef.h>
+
+int main(int argc, char const* argv[])
+{
+  (void)argc;
+  (void)argv;
+
+  Hunspell_destroy(NULL);
+
+  return 0;
+}
+`
+
+id "hunspell/hunspell"
+
+fromVer "v1.7.0"
+
+defaults {
+	"shared": "OFF",
+	"fPIC": "ON",
+}
+
+filter => {
+	for name, values in target.options {
+		if name != "shared" && name != "fPIC" {
+			return false
+		}
+		for value in values {
+			if value != "ON" && value != "OFF" {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+onBuild ctx => {
+	installDir := ctx.outputDir
+	shared := target.options["shared"][0] == "ON"
+	fPIC := target.options["fPIC"][0] == "ON"
+
+	cmakeLists := string(ctx.Proj.readFile("v1.7.0/CMakeLists.txt")!)
+	cmakeLists = strings.replace(cmakeLists, "src/src/hunspell", "src/hunspell", 1)
+	os.writeFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"), []byte(cmakeLists), 0o644)!
+
+	hunvisapi := filepath.join(ctx.SourceDir, "src", "hunspell", "hunvisapi.h")
+	os.remove(hunvisapi)!
+
+	affentry := string(os.readFile(filepath.join(ctx.SourceDir, "src", "hunspell", "affentry.cxx"))!)
+	if strings.contains(affentry, "tmpword.append(word, start + appnd.size());") {
+		affentry = strings.replace(affentry, "tmpword.append(word, start + appnd.size());", "tmpword.append(word, start + appnd.size(), tmpl);", -1)
+		os.writeFile(filepath.join(ctx.SourceDir, "src", "hunspell", "affentry.cxx"), []byte(affentry), 0o644)!
+
+		affixmgrPath := filepath.join(ctx.SourceDir, "src", "hunspell", "affixmgr.cxx")
+		affixmgr := string(os.readFile(affixmgrPath)!)
+		affixmgr = strings.replace(affixmgr, "result.append(word, i);", "result.append(word, i, word.size());", -1)
+		os.writeFile(affixmgrPath, []byte(affixmgr), 0o644)!
+	}
+
+	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
+	c.define "CMAKE_INSTALL_LIBDIR", "lib"
+	c.define "CONAN_hunspell_VERSION", "1.7.0"
+	c.defineBool "BUILD_SHARED_LIBS", shared
+	c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
+	c.configure
+	c.build
+	c.install
+
+	licenseDir := filepath.join(installDir, "licenses")
+	os.mkdirAll(licenseDir, 0o755)!
+	for name in ["COPYING", "COPYING.LESSER", "COPYING.MPL", "license.hunspell"] {
+		os.writeFile(filepath.join(licenseDir, name), os.readFile(filepath.join(ctx.SourceDir, name))!, 0o644)!
+	}
+
+	cflags := ["-I$${includedir}"]
+	if !shared {
+		cflags <- "-DHUNSPELL_STATIC"
+	}
+
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "hunspell",
+		description = "Hunspell spellchecking library",
+		version = "v1.7.0",
+		libs = ["-L$${libdir}", "-lhunspell"],
+		cflags = cflags,
+	)!
+	out := os.create(filepath.join(pcDir, "hunspell.pc"))!
+	pc.writeTo(out)!
+	out.close()!
+
+	pkgconfig.use installDir
+	ctx.setMetadata pkgconfig.lookup("hunspell")!
+}
+
+onTest ctx => {
+	installDir := ctx.outputDir
+	testDir := filepath.join(ctx.SourceDir, "_llar_consumer")
+	os.mkdirAll(testDir, 0o755)!
+
+	consumer := filepath.join(testDir, "consumer.cxx")
+	os.writeFile(consumer, []byte(consumerSource), 0o644)!
+
+	pkgconfig.use installDir
+	flagsFile := filepath.join(testDir, "hunspell.flags")
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("hunspell")!), 0o644)!
+
+	binary := filepath.join(testDir, "consumer")
+	exec! "c++", consumer, "-o", binary, "@"+flagsFile
+
+	if target.options["shared"][0] == "ON" {
+		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
+		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
+		if slices.contains(target.require["os"], "windows") {
+			path := os.getenv("PATH")
+			os.setenv("PATH", filepath.join(installDir, "bin")+";"+path)!
+		}
+	}
+	exec! binary
+}
