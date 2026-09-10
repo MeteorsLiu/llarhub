@@ -54,17 +54,6 @@ onBuild ctx => {
 	hunvisapi := filepath.join(ctx.SourceDir, "src", "hunspell", "hunvisapi.h")
 	os.remove(hunvisapi)!
 
-	affentry := string(os.readFile(filepath.join(ctx.SourceDir, "src", "hunspell", "affentry.cxx"))!)
-	if strings.contains(affentry, "tmpword.append(word, start + appnd.size());") {
-		affentry = strings.replace(affentry, "tmpword.append(word, start + appnd.size());", "tmpword.append(word, start + appnd.size(), tmpl);", -1)
-		os.writeFile(filepath.join(ctx.SourceDir, "src", "hunspell", "affentry.cxx"), []byte(affentry), 0o644)!
-
-		affixmgrPath := filepath.join(ctx.SourceDir, "src", "hunspell", "affixmgr.cxx")
-		affixmgr := string(os.readFile(affixmgrPath)!)
-		affixmgr = strings.replace(affixmgr, "result.append(word, i);", "result.append(word, i, word.size());", -1)
-		os.writeFile(affixmgrPath, []byte(affixmgr), 0o644)!
-	}
-
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
 	c.define "CONAN_hunspell_VERSION", "1.7.0"
