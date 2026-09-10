@@ -67,7 +67,7 @@ onBuild ctx => {
 	c.defineBool "CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS", shared
 	c.defineBool "ENABLE_DOCS", false
 	c.configure
-	c.build
+	c.build "--target", "cpuid_tool"
 	c.install
 
 	licenseDir := filepath.join(installDir, "licenses")
