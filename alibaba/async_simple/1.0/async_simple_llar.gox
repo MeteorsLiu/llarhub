@@ -70,8 +70,8 @@ onBuild ctx => {
 	osName := target.require["os"][0]
 
 	if !headerOnly {
-		// Conan removes this upstream ABI define before building the compiled
-		// package so consumers use the compiler's default C++ ABI.
+		// The upstream CMake pins the libstdc++ ABI to 1. Keep this downstream
+		// adjustment pending Linux consumer/toolchain ABI validation.
 		cmakeLists := filepath.join(ctx.SourceDir, "CMakeLists.txt")
 		source := string(os.readFile(cmakeLists)!)
 		source = strings.replace(source, "-D_GLIBCXX_USE_CXX11_ABI=1", "", 1)
@@ -89,10 +89,8 @@ onBuild ctx => {
 		c.build
 		c.install
 
-		// Match the Conan package's library selection. Its package() does not
-		// publish the upstream CMake files or executor headers.
-		os.removeAll(filepath.join(installDir, "include", "async_simple", "executors"))!
-		os.removeAll(filepath.join(installDir, "share", "async_simple"))!
+		// Keep the upstream-installed headers and CMake package metadata. Conan's
+		// compiled package() also uses cmake.install without removing them.
 		libDir := filepath.join(installDir, "lib")
 		if shared {
 			for archive in filepath.glob(filepath.join(libDir, "*.a"))! {
@@ -113,31 +111,32 @@ onBuild ctx => {
 		}
 	}
 
-	// Copy the Conan package's public header set. This also restores uthread
-	// headers on tag 1.0/Darwin, where the upstream CMake UTHREAD condition is
-	// false even though Conan copies those headers for compiled packages.
-	sourceDir := filepath.join(ctx.SourceDir, "async_simple")
-	includeDir := filepath.join(installDir, "include", "async_simple")
-	os.mkdirAll(includeDir, 0o755)!
-	filepath.walkDir(sourceDir, (path, entry, err) => {
-		if err != nil {
-			return err
-		}
-		if entry.isDir {
-			if entry.name == "test" || entry.name == "executors" || (headerOnly && entry.name == "uthread") {
-				return fs.SkipDir
+	if headerOnly {
+		// Match Conan's header-only package: omit tests everywhere and uthread
+		// headers on Macos, while retaining executors and Linux uthread headers.
+		sourceDir := filepath.join(ctx.SourceDir, "async_simple")
+		includeDir := filepath.join(installDir, "include", "async_simple")
+		os.mkdirAll(includeDir, 0o755)!
+		filepath.walkDir(sourceDir, (path, entry, err) => {
+			if err != nil {
+				return err
 			}
+			if entry.isDir {
+				if entry.name == "test" || (osName == "darwin" && entry.name == "uthread") {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if !entry.name.hasSuffix(".h") {
+				return nil
+			}
+			relative := filepath.rel(sourceDir, path)!
+			destination := filepath.join(includeDir, relative)
+			os.mkdirAll(filepath.dir(destination), 0o755)!
+			os.writeFile(destination, os.readFile(path)!, 0o644)!
 			return nil
-		}
-		if !entry.name.hasSuffix(".h") {
-			return nil
-		}
-		relative := filepath.rel(sourceDir, path)!
-		destination := filepath.join(includeDir, relative)
-		os.mkdirAll(filepath.dir(destination), 0o755)!
-		os.writeFile(destination, os.readFile(path)!, 0o644)!
-		return nil
-	})!
+		})!
+	}
 
 	licenseDir := filepath.join(installDir, "licenses")
 	os.mkdirAll(licenseDir, 0o755)!
