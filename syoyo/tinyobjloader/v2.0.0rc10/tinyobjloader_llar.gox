@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 const consumerSource = `#include <tiny_obj_loader.h>
@@ -49,18 +48,6 @@ onBuild ctx => {
 	fPIC := target.options["fPIC"][0] == "ON"
 	double := target.options["double"][0] == "ON"
 
-	cmakeLists := filepath.join(ctx.SourceDir, "CMakeLists.txt")
-	source := string(os.readFile(cmakeLists)!)
-	if strings.contains(source, "project(tinyobjloader)\ncmake_minimum_required(VERSION 3.2)") {
-		source = strings.replace(
-			source,
-			"project(tinyobjloader)\ncmake_minimum_required(VERSION 3.2)",
-			"cmake_minimum_required(VERSION 3.2)\nproject(tinyobjloader)",
-			1,
-		)
-		os.writeFile(cmakeLists, []byte(source), 0o644)!
-	}
-
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
 	c.define "CMAKE_INSTALL_DOCDIR", "licenses"
@@ -73,11 +60,6 @@ onBuild ctx => {
 	c.configure
 	c.build
 	c.install
-
-	headerPath := filepath.join(installDir, "include", "tiny_obj_loader.h")
-	header := string(os.readFile(headerPath)!)
-	implementationStart := strings.index(header, "#ifdef TINYOBJLOADER_IMPLEMENTATION")
-	os.writeFile(headerPath, []byte(header[:implementationStart]), 0o644)!
 
 	libraryName := "tinyobjloader"
 	if double {
