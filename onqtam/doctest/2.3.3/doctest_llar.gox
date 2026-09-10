@@ -18,13 +18,15 @@ fromVer "2.3.3"
 onBuild ctx => {
 	installDir := ctx.outputDir
 
-	includeDir := filepath.join(installDir, "include", "doctest")
-	os.mkdirAll(includeDir, 0o755)!
-	os.writeFile(
-		filepath.join(includeDir, "doctest.h"),
-		os.readFile(filepath.join(ctx.SourceDir, "doctest", "doctest.h"))!,
-		0o644,
-	)!
+	// Use the upstream install rules so the CMake consumer receives the
+	// complete Config, Version, Targets, and helper-script set.
+	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
+	c.define "CMAKE_POLICY_VERSION_MINIMUM", "3.5"
+	c.defineBool "DOCTEST_WITH_TESTS", false
+	c.defineBool "DOCTEST_WITH_MAIN_IN_STATIC_LIB", false
+	c.configure
+	c.build
+	c.install
 
 	licenseDir := filepath.join(installDir, "licenses")
 	os.mkdirAll(licenseDir, 0o755)!
