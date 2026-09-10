@@ -52,7 +52,6 @@ onBuild ctx => {
 	fPIC := target.options["fPIC"][0] == "ON"
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
-	c.define "CMAKE_INSTALL_LIBDIR", "lib"
 	c.define "CMAKE_POLICY_VERSION_MINIMUM", "3.5"
 	c.defineBool "ENTITYX_BUILD_SHARED", shared
 	c.defineBool "ENTITYX_BUILD_TESTING", false
