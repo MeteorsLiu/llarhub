@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 const consumerSource = `#include "md4c.h"
@@ -100,20 +99,13 @@ onBuild ctx => {
 		encodingMacro = "MD4C_USE_ASCII"
 	}
 
-	// The 0.5.3 source no longer hardcodes an encoding in src/CMakeLists.txt;
-	// add the selected definition to the complete CMake target tree.
-	rootCMake := filepath.join(ctx.SourceDir, "CMakeLists.txt")
-	rootSource := string(os.readFile(rootCMake)!)
-	rootSource = strings.replace(
-		rootSource,
-		"    LANGUAGES C\n)\n\n",
-		"    LANGUAGES C\n)\n\nadd_definitions(-D" + encodingMacro + ")\n\n",
-		1,
-	)
-	os.writeFile(rootCMake, []byte(rootSource), 0o644)!
-
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
+	if encoding != "utf-8" {
+		// The 0.5.3 source has no encoding option; pass the selected macro
+		// through CMake without rewriting the upstream project files.
+		c.define "CMAKE_C_FLAGS", "-D"+encodingMacro
+	}
 	c.defineBool "BUILD_SHARED_LIBS", shared
 	c.defineBool "BUILD_MD2HTML_EXECUTABLE", md2html
 	c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC

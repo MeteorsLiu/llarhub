@@ -100,22 +100,24 @@ onBuild ctx => {
 		encodingMacro = "MD4C_USE_ASCII"
 	}
 
-	// The 0.5.0-0.5.2 source hardcodes UTF-8 on the md4c target. Replace
-	// that source-backed setting, then apply the selected encoding globally.
-	rootCMake := filepath.join(ctx.SourceDir, "CMakeLists.txt")
-	rootSource := string(os.readFile(rootCMake)!)
-	rootSource = strings.replace(
-		rootSource,
-		"add_definitions(\n",
-		"add_definitions(\n    -D" + encodingMacro + "\n",
-		1,
-	)
-	os.writeFile(rootCMake, []byte(rootSource), 0o644)!
+	if encoding != "utf-8" {
+		// The 0.5.0-0.5.2 source hardcodes UTF-8 on the md4c target. Replace
+		// that source-backed setting only when selecting another encoding.
+		rootCMake := filepath.join(ctx.SourceDir, "CMakeLists.txt")
+		rootSource := string(os.readFile(rootCMake)!)
+		rootSource = strings.replace(
+			rootSource,
+			"add_definitions(\n",
+			"add_definitions(\n    -D" + encodingMacro + "\n",
+			1,
+		)
+		os.writeFile(rootCMake, []byte(rootSource), 0o644)!
 
-	srcCMake := filepath.join(ctx.SourceDir, "src", "CMakeLists.txt")
-	srcSource := string(os.readFile(srcCMake)!)
-	srcSource = strings.replace(srcSource, "COMPILE_FLAGS \"-DMD4C_USE_UTF8\"", "COMPILE_FLAGS \"\"", 1)
-	os.writeFile(srcCMake, []byte(srcSource), 0o644)!
+		srcCMake := filepath.join(ctx.SourceDir, "src", "CMakeLists.txt")
+		srcSource := string(os.readFile(srcCMake)!)
+		srcSource = strings.replace(srcSource, "COMPILE_FLAGS \"-DMD4C_USE_UTF8\"", "COMPILE_FLAGS \"\"", 1)
+		os.writeFile(srcCMake, []byte(srcSource), 0o644)!
+	}
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
