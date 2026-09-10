@@ -55,11 +55,6 @@ onBuild ctx => {
 	shared := target.options["shared"][0] == "ON"
 	fPIC := target.options["fPIC"][0] == "ON"
 
-	patch := ctx.Proj.readFile("v2.1.0/easy_profiler.patch")!
-	patchPath := filepath.join(ctx.SourceDir, "_llar_easy_profiler.patch")
-	os.writeFile(patchPath, patch, 0o644)!
-	git! "-C", ctx.SourceDir, "apply", patchPath
-
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_POLICY_VERSION_MINIMUM", "3.5"
 	c.defineBool "EASY_PROFILER_NO_GUI", true
