@@ -101,6 +101,12 @@ onBuild ctx => {
 		for path in filepath.glob(filepath.join(installDir, "lib", "*.la"))! {
 			os.remove(path)!
 		}
+		if shared && osName == "darwin" {
+			// libtool records the temporary staging prefix in the Darwin install
+			// name; make the published dylib relocatable for package consumers.
+			dylib := filepath.join(installDir, "lib", "libhunspell-1.7.0.dylib")
+			exec! "install_name_tool", "-id", "@rpath/libhunspell-1.7.0.dylib", dylib
+		}
 		os.removeAll(stagingDir)!
 	}
 
