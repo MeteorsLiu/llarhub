@@ -79,13 +79,27 @@ onBuild ctx => {
 	osName := target.require["os"][0]
 	shared := target.options["shared"][0] == "ON"
 	fPIC := target.options["fPIC"][0] == "ON"
+	inputDir := os.mkdirTemp("", "qrcode-generator-build-input-*")!
+	defer os.removeAll(inputDir)
+	for dirName in ["c", "cpp"] {
+		sourceDir := filepath.join(ctx.SourceDir, dirName)
+		destinationDir := filepath.join(inputDir, dirName)
+		os.mkdirAll(destinationDir, 0o755)!
+		for path in filepath.glob(filepath.join(sourceDir, "*"))! {
+			os.writeFile(
+				filepath.join(destinationDir, filepath.base(path)),
+				os.readFile(path)!,
+				0o644,
+			)!
+		}
+	}
 
 	cmakeLists := ctx.Proj.readFile("CMakeLists.txt")!
-	os.writeFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"), cmakeLists, 0o644)!
+	os.writeFile(filepath.join(inputDir, "CMakeLists.txt"), cmakeLists, 0o644)!
 
-	cppHeader := filepath.join(ctx.SourceDir, "cpp", "QrCode.hpp")
+	cppHeader := filepath.join(inputDir, "cpp", "QrCode.hpp")
 	cppLibrary := "qrcodegen"
-	newHeader := filepath.join(ctx.SourceDir, "cpp", "qrcodegen.hpp")
+	newHeader := filepath.join(inputDir, "cpp", "qrcodegen.hpp")
 	if _, err := os.stat(newHeader); err == nil {
 		cppHeader = newHeader
 		cppLibrary = "qrcodegencpp"
@@ -101,7 +115,7 @@ onBuild ctx => {
 		}
 	}
 
-	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
+	c := cmake.new(inputDir, filepath.join(inputDir, "_build"), installDir)
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
 	c.defineBool "BUILD_SHARED_LIBS", shared
 	if osName == "windows" && shared {
@@ -165,8 +179,8 @@ onTest ctx => {
 	installDir := ctx.outputDir
 	osName := target.require["os"][0]
 	shared := target.options["shared"][0] == "ON"
-	testDir := filepath.join(ctx.SourceDir, "_llar_consumer")
-	os.mkdirAll(testDir, 0o755)!
+	testDir := os.mkdirTemp("", "qrcode-generator-consumer-*")!
+	defer os.removeAll(testDir)
 
 	consumer := filepath.join(testDir, "consumer.cpp")
 	os.writeFile(consumer, []byte(consumerSource), 0o644)!
