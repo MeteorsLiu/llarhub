@@ -20,8 +20,20 @@ int main(void) {
     mco_desc desc = mco_desc_init(coro_entry, 0);
     desc.user_data = NULL;
     mco_coro* co;
-    mco_create(&co, &desc);
-    mco_destroy(co);
+    mco_result res = mco_create(&co, &desc);
+    assert(res == MCO_SUCCESS);
+    assert(mco_status(co) == MCO_SUSPENDED);
+
+    res = mco_resume(co);
+    assert(res == MCO_SUCCESS);
+    assert(mco_status(co) == MCO_SUSPENDED);
+
+    res = mco_resume(co);
+    assert(res == MCO_SUCCESS);
+    assert(mco_status(co) == MCO_DEAD);
+
+    res = mco_destroy(co);
+    assert(res == MCO_SUCCESS);
 
     return EXIT_SUCCESS;
 }
