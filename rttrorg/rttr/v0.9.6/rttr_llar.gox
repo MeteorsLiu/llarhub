@@ -65,29 +65,19 @@ onBuild ctx => {
 		`replace_compiler_option("$${enable_rtti_opt}" "$${disable_rtti_opt}")`, 1)
 	os.writeFile(utilityPath, []byte(utility), 0o644)!
 
-	// Conan's 002_fix_license_installer.patch removes the upstream share-file
-	// install; the Formula installs LICENSE.txt under licenses instead.
-	configPath := filepath.join(ctx.SourceDir, "CMake", "config.cmake")
-	config := string(os.readFile(configPath)!)
-	config = strings.replace(config, `if (BUILD_INSTALLER)
-    install(FILES "$${CMAKE_CURRENT_BINARY_DIR}/CMake/rttr-config-version.cmake"
-            DESTINATION $${RTTR_CMAKE_CONFIG_INSTALL_DIR}
-            COMPONENT Devel)
-
-    install(FILES "$${LICENSE_FILE}" "$${README_FILE}"
-            DESTINATION $${RTTR_ADDITIONAL_FILES_INSTALL_DIR}
-            PERMISSIONS OWNER_READ)
-endif()
-`, "", 1)
-	os.writeFile(configPath, []byte(config), 0o644)!
-
 	// The Conan recipe removes RTTR's -Werror setup so the installed library
 	// builds with current compilers without changing its public interface.
 	cmakeListsPath := filepath.join(ctx.SourceDir, "src", "rttr", "CMakeLists.txt")
 	cmakeLists := string(os.readFile(cmakeListsPath)!)
-	for targetName in ["rttr_core", "rttr_core_lib", "rttr_core_s", "rttr_core_lib_s"] {
-		cmakeLists = strings.replace(cmakeLists, "    set_compiler_warnings("+targetName+")\n", "", 1)
+	targetName := "rttr_core"
+	if !shared {
+		targetName = "rttr_core_lib"
 	}
+	warningCall := "    set_compiler_warnings("+targetName+")\n"
+	if !strings.contains(cmakeLists, warningCall) {
+		panic "failed to locate RTTR warning settings"
+	}
+	cmakeLists = strings.replace(cmakeLists, warningCall, "", 1)
 	os.writeFile(cmakeListsPath, []byte(cmakeLists), 0o644)!
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
