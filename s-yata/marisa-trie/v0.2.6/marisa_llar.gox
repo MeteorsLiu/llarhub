@@ -19,8 +19,8 @@ int main() {
 
 id "s-yata/marisa-trie"
 
-// v0.2.6 is the first Conan-served tag with the verified CMake patch. The
-// same patch applies to v0.2.7; v0.3.0 and later provide CMake upstream.
+// v0.2.6 and v0.2.7 use the upstream Autotools build. v0.3.0 and later
+// provide CMake upstream.
 fromVer "v0.2.6"
 
 defaults {
@@ -46,37 +46,74 @@ filter => {
 onBuild ctx => {
 	installDir := ctx.outputDir
 	cmakeLists := filepath.join(ctx.SourceDir, "CMakeLists.txt")
-	needsCMakePolicy := false
 
-	// v0.2.6 and v0.2.7 need the exact Conan CMake patch; v0.3.0 and newer
-	// already carry their own CMake build, so apply it only when absent.
+	// v0.2.6 and v0.2.7 ship Autotools only. Build those tags in-tree after
+	// generating their configure script; v0.3.0 and newer provide CMake.
 	if _, err := os.stat(cmakeLists); os.isNotExist(err) {
-		needsCMakePolicy = true
-		patch := ctx.Proj.readFile("v0.2.6/0001-add-cmake.patch")!
-		patchPath := filepath.join(ctx.SourceDir, "_llar_add_cmake.patch")
-		os.writeFile(patchPath, patch, 0o644)!
-		git! "-C", ctx.SourceDir, "apply", "--unidiff-zero", patchPath
+		exec! "autoreconf", "-fi"
+		shared := target.options["shared"][0] == "ON"
+		fPIC := target.options["fPIC"][0] == "ON"
+		tools := target.options["tools"][0] == "ON"
+		// The build matrix may contain '|', which libtool would parse as a
+		// shell pipeline when embedded in an absolute -rpath. Stage the
+		// install at a source-local path and copy its files to LLAR output.
+		stageDir := filepath.join(ctx.SourceDir, "_llar_install")
+		a := autotools.new(ctx.SourceDir, ctx.SourceDir, stageDir)
+		if shared {
+			if fPIC {
+				a.configure "--enable-shared", "--disable-static", "--enable-pic"
+			} else {
+				a.configure "--enable-shared", "--disable-static", "--disable-pic"
+			}
+		} else {
+			if fPIC {
+				a.configure "--disable-shared", "--enable-static", "--enable-pic"
+			} else {
+				a.configure "--disable-shared", "--enable-static", "--disable-pic"
+			}
+		}
+		a.build
+		a.install
+
+		includeDir := filepath.join(installDir, "include")
+		os.mkdirAll(filepath.join(includeDir, "marisa"), 0o755)!
+		for path in filepath.glob(filepath.join(stageDir, "include", "*.h"))! {
+			cp! path, filepath.join(includeDir, filepath.base(path))
+		}
+		for path in filepath.glob(filepath.join(stageDir, "include", "marisa", "*.h"))! {
+			cp! path, filepath.join(includeDir, "marisa", filepath.base(path))
+		}
+		libDir := filepath.join(installDir, "lib")
+		os.mkdirAll(libDir, 0o755)!
+		for path in filepath.glob(filepath.join(stageDir, "lib", "libmarisa*"))! {
+			cp! path, filepath.join(libDir, filepath.base(path))
+		}
+		os.removeAll(filepath.join(libDir, "libmarisa.la"))!
+		if tools {
+			binDir := filepath.join(installDir, "bin")
+			os.mkdirAll(binDir, 0o755)!
+			for path in filepath.glob(filepath.join(stageDir, "bin", "*"))! {
+				cp! path, filepath.join(binDir, filepath.base(path))
+			}
+		}
 	} else if err != nil {
 		panic err
-	}
+	} else {
+		shared := target.options["shared"][0] == "ON"
+		fPIC := target.options["fPIC"][0] == "ON"
+		tools := target.options["tools"][0] == "ON"
 
-	shared := target.options["shared"][0] == "ON"
-	fPIC := target.options["fPIC"][0] == "ON"
-	tools := target.options["tools"][0] == "ON"
-
-	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
-	if needsCMakePolicy {
-		c.define "CMAKE_POLICY_VERSION_MINIMUM", "3.5"
+		c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
+		c.define "CMAKE_INSTALL_LIBDIR", "lib"
+		c.define "LIB_INSTALL_DIR", "lib"
+		c.defineBool "BUILD_SHARED_LIBS", shared
+		c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
+		c.defineBool "BUILD_TOOLS", tools
+		c.defineBool "ENABLE_TOOLS", tools
+		c.configure
+		c.build
+		c.install
 	}
-	c.define "CMAKE_INSTALL_LIBDIR", "lib"
-	c.define "LIB_INSTALL_DIR", "lib"
-	c.defineBool "BUILD_SHARED_LIBS", shared
-	c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
-	c.defineBool "BUILD_TOOLS", tools
-	c.defineBool "ENABLE_TOOLS", tools
-	c.configure
-	c.build
-	c.install
 
 	licenseDir := filepath.join(installDir, "licenses")
 	os.mkdirAll(licenseDir, 0o755)!
