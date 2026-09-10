@@ -46,22 +46,63 @@ onBuild ctx => {
 	installDir := ctx.outputDir
 	shared := target.options["shared"][0] == "ON"
 	fPIC := target.options["fPIC"][0] == "ON"
+	osName := target.require["os"][0]
 
-	cmakeLists := string(ctx.Proj.readFile("v1.7.0/CMakeLists.txt")!)
-	cmakeLists = strings.replace(cmakeLists, "src/src/hunspell", "src/hunspell", 1)
-	os.writeFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"), []byte(cmakeLists), 0o644)!
+	libName := "hunspell-1.7"
+	if osName == "windows" {
+		// Windows keeps the module's existing CMake adapter. The upstream tag
+		// provides Visual Studio projects, while the adapter supplies the
+		// install layout used by this formula.
+		cmakeLists := string(ctx.Proj.readFile("v1.7.0/CMakeLists.txt")!)
+		cmakeLists = strings.replace(cmakeLists, "src/src/hunspell", "src/hunspell", 1)
+		os.writeFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"), []byte(cmakeLists), 0o644)!
 
-	hunvisapi := filepath.join(ctx.SourceDir, "src", "hunspell", "hunvisapi.h")
-	os.remove(hunvisapi)!
+		hunvisapi := filepath.join(ctx.SourceDir, "src", "hunspell", "hunvisapi.h")
+		os.remove(hunvisapi)!
 
-	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
-	c.define "CMAKE_INSTALL_LIBDIR", "lib"
-	c.define "CONAN_hunspell_VERSION", "1.7.0"
-	c.defineBool "BUILD_SHARED_LIBS", shared
-	c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
-	c.configure
-	c.build
-	c.install
+		c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
+		c.define "CMAKE_INSTALL_LIBDIR", "lib"
+		c.define "CONAN_hunspell_VERSION", "1.7.0"
+		c.defineBool "BUILD_SHARED_LIBS", shared
+		c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
+		c.configure
+		c.build
+		c.install
+
+		libName = "hunspell"
+	} else {
+		os.chdir(ctx.SourceDir)!
+		if exec("libtoolize", "--copy", "--force") != nil {
+			glibtoolize! "--copy", "--force"
+		}
+		autoreconf! "-fi"
+
+		picFlag := "--without-pic"
+		if fPIC {
+			picFlag = "--with-pic"
+		}
+		// The validator and LLAR matrix encode option values in outputDir with
+		// '|', which libtool treats as a shell pipeline in its -rpath command.
+		// Install to a source-local staging path, then copy only the library
+		// payload into LLAR's output directory.
+		stagingDir := filepath.join(ctx.SourceDir, "_llar_autotools_install")
+		a := autotools.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), stagingDir)
+		if shared {
+			a.configure "--enable-shared", "--disable-static", picFlag
+		} else {
+			a.configure "--disable-shared", "--enable-static", picFlag
+		}
+		a.build
+		a.install
+		os.mkdirAll(filepath.join(installDir, "include"), 0o755)!
+		os.mkdirAll(filepath.join(installDir, "lib"), 0o755)!
+		exec! "cp", "-R", filepath.join(stagingDir, "include")+"/.", filepath.join(installDir, "include")
+		exec! "cp", "-R", filepath.join(stagingDir, "lib")+"/.", filepath.join(installDir, "lib")
+		for path in filepath.glob(filepath.join(installDir, "lib", "*.la"))! {
+			os.remove(path)!
+		}
+		os.removeAll(stagingDir)!
+	}
 
 	licenseDir := filepath.join(installDir, "licenses")
 	os.mkdirAll(licenseDir, 0o755)!
@@ -80,7 +121,7 @@ onBuild ctx => {
 		name = "hunspell",
 		description = "Hunspell spellchecking library",
 		version = "v1.7.0",
-		libs = ["-L$${libdir}", "-lhunspell"],
+		libs = ["-L$${libdir}", "-l"+libName],
 		cflags = cflags,
 	)!
 	out := os.create(filepath.join(pcDir, "hunspell.pc"))!
