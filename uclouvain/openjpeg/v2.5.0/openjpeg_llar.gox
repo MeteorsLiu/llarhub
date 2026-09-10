@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 const consumerSource = `#include <openjpeg.h>
@@ -45,11 +44,6 @@ onBuild ctx => {
 	shared := target.options["shared"][0] == "ON"
 	fPIC := target.options["fPIC"][0] == "ON"
 	osName := target.require["os"][0]
-
-	sourcePath := filepath.join(ctx.SourceDir, "CMakeLists.txt")
-	source := string(os.readFile(sourcePath)!)
-	source = strings.replace(source, "-ffast-math", "-ffast-math;-fno-finite-math-only", -1)
-	os.writeFile(sourcePath, []byte(source), 0o644)!
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_POLICY_VERSION_MINIMUM", "3.5"
