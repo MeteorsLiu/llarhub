@@ -26,16 +26,6 @@ onBuild ctx => {
 		0o644,
 	)!
 
-	cmakeDir := filepath.join(installDir, "lib", "cmake")
-	os.mkdirAll(cmakeDir, 0o755)!
-	for name in ["doctest.cmake", "doctestAddTests.cmake"] {
-		os.writeFile(
-			filepath.join(cmakeDir, name),
-			os.readFile(filepath.join(ctx.SourceDir, "scripts", "cmake", name))!,
-			0o644,
-		)!
-	}
-
 	licenseDir := filepath.join(installDir, "licenses")
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(
