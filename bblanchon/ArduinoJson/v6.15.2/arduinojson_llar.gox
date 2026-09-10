@@ -34,19 +34,32 @@ onBuild ctx => {
 		os.writeFile(destination, os.readFile(path)!, 0o644)!
 	}
 
-	ctx.setMetadata "-I" + includeDir
+	pcDir := filepath.join(installDir, "lib", "pkgconfig")
+	os.mkdirAll(pcDir, 0o755)!
+	pc := pkgconfig.new(
+		name = "arduinojson",
+		description = "C++ JSON library for IoT",
+		version = "v6.15.2",
+		cflags = ["-I$${includedir}"],
+	)!
+	out := os.create(filepath.join(pcDir, "arduinojson.pc"))!
+	pc.writeTo(out)!
+	out.close()!
+
+	pkgconfig.use installDir
+	ctx.setMetadata pkgconfig.lookup("arduinojson")!
 }
 
 onTest ctx => {
 	installDir := ctx.outputDir
-	includeDir := filepath.join(installDir, "include")
 	testDir := filepath.join(ctx.SourceDir, "_llar_consumer")
 	os.mkdirAll(testDir, 0o755)!
 
 	consumer := filepath.join(testDir, "consumer.cpp")
 	os.writeFile(consumer, ctx.Proj.readFile("v6.15.2/consumer.cpp")!, 0o644)!
+	pkgconfig.use installDir
 	flagsFile := filepath.join(testDir, "arduinojson.flags")
-	os.writeFile(flagsFile, []byte("-I"+includeDir), 0o644)!
+	os.writeFile(flagsFile, []byte(pkgconfig.lookup("arduinojson")!), 0o644)!
 
 	binary := filepath.join(testDir, "consumer")
 	exec! "c++", consumer, "@"+flagsFile, "-o", binary
