@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 const consumerSource = `#include <cstdio>
@@ -73,16 +72,6 @@ onBuild ctx => {
 	os.writeFile(patchPath, ctx.Proj.readFile("v3.2.4/gcc5-bug-workaround.patch")!, 0o644)!
 	patch! "-p1", "--batch", "--forward", "-i", patchPath
 
-	topLevelPath := filepath.join(ctx.SourceDir, "CMakeLists.txt")
-	topLevelSource := string(os.readFile(topLevelPath)!)
-	websiteBlock := "if (OPENEXR_BUILD_LIBS AND NOT OPENEXR_IS_SUBPROJECT)\n"+
-		"  # Even if not building the website, still make sure the website example code compiles.\n"+		"  add_subdirectory(website/src)\n"+		"endif()\n"
-	patchedTopLevel := strings.replace(topLevelSource, websiteBlock, "", 1)
-	if patchedTopLevel == topLevelSource {
-		panic "OpenEXR website source block was not found"
-	}
-	os.writeFile(topLevelPath, []byte(patchedTopLevel), 0o644)!
-
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	for dep in ctx.Proj.Deps {
 		c.use ctx.outputDir(dep)
@@ -92,12 +81,14 @@ onBuild ctx => {
 	c.defineBool "BUILD_SHARED_LIBS", false
 	c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", true
 	c.defineBool "BUILD_TESTING", false
+	c.defineBool "OPENEXR_BUILD_TOOLS", false
+	c.defineBool "OPENEXR_INSTALL_TOOLS", false
 	c.defineBool "OPENEXR_BUILD_EXAMPLES", false
 	c.defineBool "OPENEXR_BUILD_PYTHON", false
 	c.defineBool "OPENEXR_INSTALL_DOCS", false
 	c.defineBool "OPENEXR_INSTALL_PKG_CONFIG", false
 	c.configure
-	c.build
+	c.build "--target", "OpenEXR", "OpenEXRUtil", "OpenEXRCore", "Iex", "IlmThread"
 	c.install
 
 	licenseDir := filepath.join(installDir, "licenses")
