@@ -55,6 +55,12 @@ onBuild ctx => {
 		"",
 		1,
 	)
+	source = strings.replace(
+		source,
+		"target_compile_options(efsw PRIVATE -Wall -Wno-long-long -fPIC)",
+		"target_compile_options(efsw PRIVATE -Wall -Wno-long-long)",
+		1,
+	)
 	os.writeFile(cmakeLists, []byte(source), 0o644)!
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
