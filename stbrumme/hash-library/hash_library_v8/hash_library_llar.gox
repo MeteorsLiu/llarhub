@@ -61,16 +61,25 @@ onBuild ctx => {
 	installDir := ctx.outputDir
 	shared := target.options["shared"][0] == "ON"
 	fPIC := target.options["fPIC"][0] == "ON"
-
-	os.writeFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"), ctx.Proj.readFile("hash_library_v8/CMakeLists.txt")!, 0o644)!
-	if target.require["os"][0] == "darwin" {
-		patchPath := filepath.join(ctx.SourceDir, "_llar_fix_macos.patch")
-		os.writeFile(patchPath, ctx.Proj.readFile("hash_library_v8/001-fix-macos.patch")!, 0o644)!
-		patch! "-p1", "-i", patchPath
+	inputDir := os.mkdirTemp("", "hash-library-build-input-*")!
+	defer os.removeAll(inputDir)
+	for name in [
+		"crc32.cpp", "keccak.cpp", "md5.cpp", "sha1.cpp", "sha256.cpp", "sha3.cpp",
+		"crc32.h", "hash.h", "hmac.h", "keccak.h", "md5.h", "sha1.h", "sha256.h", "sha3.h",
+		"LICENSE",
+	] {
+		cp! filepath.join(ctx.SourceDir, name), filepath.join(inputDir, name)
 	}
 
-	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
-	c.define "HASH_LIBRARY_SRC_DIR", ctx.SourceDir
+	os.writeFile(filepath.join(inputDir, "CMakeLists.txt"), ctx.Proj.readFile("hash_library_v8/CMakeLists.txt")!, 0o644)!
+	if target.require["os"][0] == "darwin" {
+		patchPath := filepath.join(inputDir, "_llar_fix_macos.patch")
+		os.writeFile(patchPath, ctx.Proj.readFile("hash_library_v8/001-fix-macos.patch")!, 0o644)!
+		git! "-C", inputDir, "apply", patchPath
+	}
+
+	c := cmake.new(inputDir, filepath.join(inputDir, "_build"), installDir)
+	c.define "HASH_LIBRARY_SRC_DIR", inputDir
 	c.defineBool "BUILD_SHARED_LIBS", shared
 	c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
 	c.configure
@@ -100,8 +109,8 @@ onBuild ctx => {
 
 onTest ctx => {
 	installDir := ctx.outputDir
-	testDir := filepath.join(ctx.SourceDir, "_llar_consumer")
-	os.mkdirAll(testDir, 0o755)!
+	testDir := os.mkdirTemp("", "hash-library-consumer-*")!
+	defer os.removeAll(testDir)
 
 	sourcePath := filepath.join(testDir, "consumer.cpp")
 	os.writeFile(sourcePath, []byte(consumerSource), 0o644)!
