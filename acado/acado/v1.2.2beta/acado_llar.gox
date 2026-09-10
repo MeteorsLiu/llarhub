@@ -6,25 +6,7 @@ import (
 )
 
 var (
-	qpoasesCMake = `SET( ACADO_QPOASES_EMBEDDED_SOURCES
-	$${CMAKE_CURRENT_LIST_DIR}/qpoases/SRC/Bounds.cpp
-	$${CMAKE_CURRENT_LIST_DIR}/qpoases/SRC/CyclingManager.cpp
-	$${CMAKE_CURRENT_LIST_DIR}/qpoases/SRC/MessageHandling.cpp
-	$${CMAKE_CURRENT_LIST_DIR}/qpoases/SRC/QProblem.cpp
-	$${CMAKE_CURRENT_LIST_DIR}/qpoases/SRC/Utils.cpp
-	$${CMAKE_CURRENT_LIST_DIR}/qpoases/SRC/Constraints.cpp
-	$${CMAKE_CURRENT_LIST_DIR}/qpoases/SRC/Indexlist.cpp
-	$${CMAKE_CURRENT_LIST_DIR}/qpoases/SRC/QProblemB.cpp
-	$${CMAKE_CURRENT_LIST_DIR}/qpoases/SRC/SubjectTo.cpp
-	$${CMAKE_CURRENT_LIST_DIR}/qpoases/SRC/EXTRAS/SolutionAnalysis.cpp
-)
-SET( ACADO_QPOASES_EMBEDDED_INC_DIRS
-	$${CMAKE_CURRENT_LIST_DIR}/qpoases/
-	$${CMAKE_CURRENT_LIST_DIR}/qpoases/INCLUDE
-	$${CMAKE_CURRENT_LIST_DIR}/qpoases/SRC
-)`
-
-codegenSource = `#include <acado/acado_code_generation.hpp>
+	codegenSource = `#include <acado/acado_code_generation.hpp>
 #include <cstdlib>
 
 USING_NAMESPACE_ACADO
@@ -182,10 +164,6 @@ id "acado/acado"
 
 fromVer "v1.2.2beta"
 
-onRequire (proj, deps) => {
-	deps.require "coin-or/qpOASES", "releases/3.2.1"
-}
-
 defaults {
 	"shared": "OFF",
 	"fPIC": "ON",
@@ -218,8 +196,6 @@ onBuild ctx => {
 	source = strings.replace(source, "CMAKE_MINIMUM_REQUIRED( VERSION 2.8 )", "CMAKE_MINIMUM_REQUIRED( VERSION 3.15 )", 1)
 	source = strings.replace(source, "CMAKE_POLICY(SET CMP0026 OLD)", "CMAKE_POLICY(SET CMP0026 NEW)", 1)
 	source = strings.replace(source, "CMAKE_POLICY(SET CMP0042 OLD)", "CMAKE_POLICY(SET CMP0042 NEW)", 1)
-	source = strings.replace(source, "\t$${PROJECT_SOURCE_DIR}/external_packages/qpOASES-3.2.0/include\n", "", 2)
-	source = strings.replace(source, "\t#\n\t# Build qpOASES library\n\t#\n\tADD_SUBDIRECTORY( ./external_packages/qpOASES-3.2.0 )\n\t\n", "", 1)
 	os.writeFile(cmakeLists, []byte(source), 0o644)!
 
 	declarationPath := filepath.join(ctx.SourceDir, "acado", "code_generation", "export_function_declaration.cpp")
@@ -244,7 +220,7 @@ onBuild ctx => {
 	templateSource = strings.replace(
 		templateSource,
 		"\tfolders = TEMPLATE_PATHS;",
-		"\tif(const char* template_paths = std::getenv(\"ACADO_TEMPLATE_PATHS\"))\n\t{\n\t\tfolders = template_paths;\n\t}",
+		"\tif(const char* template_paths = std::getenv(\"ACADO_TEMPLATE_PATHS\"))\n\t{\n\t\tfolders = template_paths;\n\t}\n\telse\n\t{\n\t\tfolders = TEMPLATE_PATHS;\n\t}",
 		1,
 	)
 	os.writeFile(templatePath, []byte(templateSource), 0o644)!
@@ -268,10 +244,6 @@ onBuild ctx => {
 	if !shared {
 		c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
 	}
-	for dep in ctx.Proj.Deps {
-		c.use ctx.outputDir(dep)
-	}
-
 	c.configure
 	c.build
 	c.install
@@ -284,10 +256,6 @@ onBuild ctx => {
 		}
 		os.writeFile(filepath.join(libDir, filepath.base(casadi[0])), os.readFile(casadi[0])!, 0o644)!
 	}
-
-	cmakeDir := filepath.join(installDir, "lib", "cmake")
-	os.mkdirAll(cmakeDir, 0o755)!
-	os.writeFile(filepath.join(cmakeDir, "qpoases.cmake"), []byte(qpoasesCMake), 0o644)!
 
 	licenseDir := filepath.join(installDir, "licenses")
 	os.mkdirAll(licenseDir, 0o755)!
