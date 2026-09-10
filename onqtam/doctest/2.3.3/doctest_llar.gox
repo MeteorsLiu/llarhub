@@ -22,6 +22,7 @@ onBuild ctx => {
 	// complete Config, Version, Targets, and helper-script set.
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_POLICY_VERSION_MINIMUM", "3.5"
+	c.define "CMAKE_INSTALL_LIBDIR", "lib"
 	c.defineBool "DOCTEST_WITH_TESTS", false
 	c.defineBool "DOCTEST_WITH_MAIN_IN_STATIC_LIB", false
 	c.configure
