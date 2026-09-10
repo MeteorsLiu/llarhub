@@ -141,9 +141,11 @@ onBuild ctx => {
 	installDir := ctx.outputDir
 	shared := target.options["shared"][0] == "ON"
 	fPIC := target.options["fPIC"][0] == "ON"
+	osName := target.require["os"][0]
 
 	// Reuse upstream's configure.ac/Makefile.am so libtool controls the
-	// shared/static target and installs the archive under the requested libdir.
+	// shared/static target. Stage outside LLAR's option-encoded output path;
+	// libtool treats a '|' in its -rpath as shell syntax.
 	os.chdir(ctx.SourceDir)!
 	if exec("libtoolize", "--copy", "--force") != nil {
 		glibtoolize! "--copy", "--force"
@@ -154,7 +156,8 @@ onBuild ctx => {
 	if fPIC {
 		picFlag = "--with-pic"
 	}
-	a := autotools.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
+	stageDir := filepath.join(ctx.SourceDir, "_llar_install")
+	a := autotools.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), stageDir)
 	if shared {
 		a.configure "--enable-shared", "--disable-static", picFlag
 	} else {
@@ -163,11 +166,33 @@ onBuild ctx => {
 	a.build
 	a.install
 
+	includeDir := filepath.join(installDir, "include", "enet")
+	os.mkdirAll(includeDir, 0o755)!
+	for path in filepath.glob(filepath.join(stageDir, "include", "enet", "*.h"))! {
+		cp! path, filepath.join(includeDir, filepath.base(path))
+	}
+
+	libDir := filepath.join(installDir, "lib")
+	os.mkdirAll(libDir, 0o755)!
+	for path in filepath.glob(filepath.join(stageDir, "lib", "libenet*"))! {
+		cp! path, filepath.join(libDir, filepath.base(path))
+	}
+	os.removeAll(filepath.join(libDir, "libenet.la"))!
+	if shared && osName == "darwin" {
+		for entry in os.readDir(libDir)! {
+			if entry.isDir || entry.Type() & os.ModeSymlink != 0 || !entry.name.hasSuffix(".dylib") {
+				continue
+			}
+			path := filepath.join(libDir, entry.name)
+			exec! "install_name_tool", "-id", path, path
+		}
+	}
+	os.removeAll(stageDir)!
+
 	licenseDir := filepath.join(installDir, "licenses")
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
 
-	osName := target.require["os"][0]
 	libs := ["-L$${libdir}", "-lenet"]
 	cflags := ["-I$${includedir}"]
 	if osName == "windows" {
