@@ -57,18 +57,17 @@ onBuild ctx => {
 	cmakeLists := filepath.join(ctx.SourceDir, "CMakeLists.txt")
 	source := string(os.readFile(cmakeLists)!)
 	source = strings.replace(source, "\r\n", "\n", -1)
-	source = strings.replace(source, `cmake_minimum_required(VERSION 2.6 FATAL_ERROR)
-cmake_policy(VERSION 2.6)
+	source = strings.replace(source, `cmake_policy(VERSION 2.6)
 if(POLICY CMP0063)
 	cmake_policy(SET CMP0063 OLD)
 endif()
-`, `cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
-`, 1)
+`, "", 1)
 	source = strings.replace(source, "set(CMAKE_POSITION_INDEPENDENT_CODE ON)\n", "", 1)
 	os.writeFile(cmakeLists, []byte(source), 0o644)!
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
+	c.define "CMAKE_POLICY_VERSION_MINIMUM", "3.5"
 	c.defineBool "BUILD_TESTING", false
 	c.defineBool "BUILD_SHARED_LIBS", shared
 	if !shared {
