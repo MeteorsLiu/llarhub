@@ -49,13 +49,10 @@ onBuild ctx => {
 	fPIC := target.options["fPIC"][0] == "ON"
 	noExceptions := target.options["noexceptions"][0] == "ON"
 
-	// The upstream project adds its test and demo subdirectories unconditionally
-	// in these releases; Conan disables their existing entrypoints before build.
-	os.writeFile(filepath.join(ctx.SourceDir, "test", "CMakeLists.txt"), []byte(""), 0o644)!
-	os.writeFile(filepath.join(ctx.SourceDir, "demo", "CMakeLists.txt"), []byte(""), 0o644)!
-
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
+	c.defineBool "IIR1_BUILD_TESTING", false
+	c.defineBool "IIR1_BUILD_DEMO", false
 	c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
 	if noExceptions {
 		c.defineBool "IIR1_NO_EXCEPTIONS", true

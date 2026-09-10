@@ -47,17 +47,12 @@ onBuild ctx => {
 	shared := target.options["shared"][0] == "ON"
 	fPIC := target.options["fPIC"][0] == "ON"
 
-	// The upstream project adds its test and demo subdirectories unconditionally
-	// in these releases; Conan disables their existing entrypoints before build.
-	os.writeFile(filepath.join(ctx.SourceDir, "test", "CMakeLists.txt"), []byte(""), 0o644)!
-	os.writeFile(filepath.join(ctx.SourceDir, "demo", "CMakeLists.txt"), []byte(""), 0o644)!
-
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
 	c.define "CMAKE_POLICY_VERSION_MINIMUM", "3.5"
 	c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
 	c.configure
-	c.build
+	c.build "--target", "iir", "iir_static"
 	c.install
 
 	if shared {
