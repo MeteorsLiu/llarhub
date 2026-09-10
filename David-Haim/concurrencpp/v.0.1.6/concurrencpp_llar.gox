@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 const consumerSource = `#include "concurrencpp/concurrencpp.h"
@@ -54,16 +53,6 @@ onBuild ctx => {
 	shared := target.options["shared"][0] == "ON"
 	fPIC := target.options["fPIC"][0] == "ON"
 
-	cmakeLists := filepath.join(ctx.SourceDir, "CMakeLists.txt")
-	source := string(os.readFile(cmakeLists)!)
-	source = strings.replace(source, "cmake_minimum_required(VERSION 3.16)", "cmake_minimum_required(VERSION 3.15)", 1)
-	source = strings.replace(source, "concurrencpp-" + "$" + "{PROJECT_VERSION}", "concurrencpp", 1)
-	source = strings.replace(source, "$" + "{CMAKE_INSTALL_INCLUDEDIR}/" + "$" + "{concurrencpp_directory}", "$" + "{CMAKE_INSTALL_INCLUDEDIR}", 1)
-	if !strings.contains(source, `set(concurrencpp_directory "concurrencpp")`) {
-		panic "concurrencpp install directory patch did not match CMakeLists.txt"
-	}
-	os.writeFile(cmakeLists, []byte(source), 0o644)!
-
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
 	c.defineBool "BUILD_SHARED_LIBS", shared
@@ -71,6 +60,9 @@ onBuild ctx => {
 	c.configure
 	c.build
 	c.install
+
+	includeDirs := filepath.glob(filepath.join(installDir, "include", "concurrencpp-*"))!
+	includeDir := filepath.base(includeDirs[0])
 
 	licenseDir := filepath.join(installDir, "licenses")
 	os.mkdirAll(licenseDir, 0o755)!
@@ -88,7 +80,7 @@ onBuild ctx => {
 		description = "Modern concurrency for C++",
 		version = "v.0.1.6",
 		libs = libs,
-		cflags = ["-I$${includedir}"],
+		cflags = ["-I$${includedir}/" + includeDir],
 	)!
 	out := os.create(filepath.join(pcDir, "concurrencpp.pc"))!
 	pc.writeTo(out)!
