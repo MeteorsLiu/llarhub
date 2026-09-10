@@ -47,9 +47,8 @@ onBuild ctx => {
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
-	c.defineBool "CAPSTONE_BUILD_SHARED_LIBS", shared
-	c.defineBool "CAPSTONE_BUILD_STATIC_LIBS", !shared
-	c.defineBool "CAPSTONE_BUILD_STATIC_MSVC_RUNTIME", shared
+	c.defineBool "BUILD_SHARED_LIBS", shared
+	c.defineBool "CAPSTONE_BUILD_STATIC_RUNTIME", shared
 	c.defineBool "CAPSTONE_BUILD_CSTOOL", false
 	c.defineBool "CAPSTONE_BUILD_CSTEST", false
 	c.defineBool "CAPSTONE_INSTALL", true
