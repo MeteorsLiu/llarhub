@@ -256,39 +256,14 @@ onBuild ctx => {
 	shared := target.options["shared"][0] == "ON"
 	fPIC := target.options["fPIC"][0] == "ON"
 
-	cmakeLists := filepath.join(ctx.SourceDir, "CMakeLists.txt")
-	root := string(os.readFile(cmakeLists)!)
-	root = root.replace("ADD_SUBDIRECTORY(test)\n", "", 1)
-	root = root.replace("ADD_SUBDIRECTORY(example)\n", "", 1)
-	root = root.replace("ADD_SUBDIRECTORY(perf)\n", "", 1)
-	root = root.replace("INCLUDE(YAJLDoc.cmake)\n", "", 1)
-	os.writeFile(cmakeLists, []byte(root), 0o644)!
-
-	srcLists := filepath.join(ctx.SourceDir, "src", "CMakeLists.txt")
-	src := string(os.readFile(srcLists)!)
-	apple := src.index("IF(APPLE)")
-	endifApple := "ENDIF(APPLE)"
-	endApple := src.index(endifApple)
-	if apple >= 0 && endApple > apple {
-		src = src[:apple] + src[endApple+endifApple.len:]
-	}
-	os.writeFile(srcLists, []byte(src), 0o644)!
-
 	for subdir, targetName in {"reformatter": "json_reformat", "verify": "json_verify"} {
 		path := filepath.join(ctx.SourceDir, subdir, "CMakeLists.txt")
 		text := string(os.readFile(path)!)
-		for needle in ["GET_TARGET_PROPERTY(binPath ${targetName} LOCATION)", "ADD_CUSTOM_COMMAND(TARGET ${targetName} POST_BUILD"] {
-			i := text.index(needle)
-			if i < 0 {
-				continue
-			}
-			rest := text[i:]
-			j := rest.index(")\n")
-			if j < 0 {
-				panic "missing cmake command end for ${needle}"
-			}
-			text = text[:i] + rest[j+2:]
-		}
+		text = text.replace(
+			"GET_TARGET_PROPERTY(binPath ${targetName} LOCATION)",
+			"SET(binPath $$<TARGET_FILE:${targetName}>)",
+			1,
+		)
 		os.writeFile(path, []byte(text), 0o644)!
 	}
 
