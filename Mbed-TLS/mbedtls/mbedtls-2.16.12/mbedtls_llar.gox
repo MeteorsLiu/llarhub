@@ -76,9 +76,6 @@ onBuild ctx => {
 	c.defineBool "CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS", true
 
 	cFlags := ""
-	if shared {
-		cFlags = "-DX509_BUILD_SHARED=1"
-	}
 	if enableThreading {
 		if cFlags != "" {
 			cFlags += " "
