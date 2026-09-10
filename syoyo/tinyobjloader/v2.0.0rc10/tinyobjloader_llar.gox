@@ -18,6 +18,20 @@ int main() {
 }
 `
 
+const headerOnlyConsumerSource = `
+#define TINYOBJLOADER_IMPLEMENTATION
+#include <tiny_obj_loader.h>
+
+int main() {
+    tinyobj::ObjReader reader;
+    if (!reader.ParseFromString(
+            "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n", "")) {
+        return 1;
+    }
+    return reader.Valid() ? 0 : 2;
+}
+`
+
 id "syoyo/tinyobjloader"
 
 fromVer "v2.0.0rc10"
@@ -100,6 +114,13 @@ onTest ctx => {
 		libraryName += "_double"
 	}
 	pkgconfig.use installDir
+	headerOnlyConsumer := filepath.join(testDir, "header_only.cpp")
+	os.writeFile(headerOnlyConsumer, []byte(headerOnlyConsumerSource), 0o644)!
+	headerOnlyFlags := filepath.join(testDir, "header_only.cflags")
+	os.writeFile(headerOnlyFlags, []byte(pkgconfig.CFlags(libraryName)!), 0o644)!
+	headerOnlyBinary := filepath.join(testDir, "header_only")
+	exec! "c++", "-std=c++11", headerOnlyConsumer, "-o", headerOnlyBinary, "@"+headerOnlyFlags
+	exec! headerOnlyBinary
 	flagsFile := filepath.join(testDir, libraryName+".flags")
 	os.writeFile(flagsFile, []byte(pkgconfig.lookup(libraryName)!), 0o644)!
 
