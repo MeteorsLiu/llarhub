@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 const consumerSource = `#include <nlopt.h>
@@ -60,25 +59,16 @@ onBuild ctx => {
 	fPIC := target.options["fPIC"][0] == "ON"
 	enableCxxRoutines := target.options["enable_cxx_routines"][0] == "ON"
 
-	// NLopt versions before 2.8.0 force -fPIC for static builds. Conan removes
-	// those assignments so its fPIC option controls the build.
-	cmakeLists := filepath.join(ctx.SourceDir, "CMakeLists.txt")
-	source := string(os.readFile(cmakeLists)!)
-	source = strings.replace(source, `set (CMAKE_C_FLAGS "-fPIC ${CMAKE_C_FLAGS}")`, "", 1)
-	source = strings.replace(source, `set (CMAKE_CXX_FLAGS "-fPIC ${CMAKE_CXX_FLAGS}")`, "", 1)
-	os.writeFile(cmakeLists, []byte(source), 0o644)!
-	for scriptPath in filepath.glob(filepath.join(ctx.SourceDir, "cmake", "generate-*.cmake"))! {
-		script := string(os.readFile(scriptPath)!)
-		script = strings.replace(script, "cmake_minimum_required (VERSION 2.8.11)", "cmake_minimum_required (VERSION 3.5)", 1)
-		script = strings.replace(script, "cmake_minimum_required (VERSION 3.2)", "cmake_minimum_required (VERSION 3.5)", 1)
-		os.writeFile(scriptPath, []byte(script), 0o644)!
-	}
-
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
 	c.define "CMAKE_POLICY_VERSION_MINIMUM", "3.5"
 	c.defineBool "BUILD_SHARED_LIBS", shared
 	c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
+	if !shared && !fPIC {
+		// The v2.6.1 CMakeLists probes HAS_FPIC before adding a global -fPIC
+		// flag. Pre-seed that probe so fPIC=OFF remains caller-controlled.
+		c.defineBool "HAS_FPIC", false
+	}
 	c.defineBool "NLOPT_CXX", enableCxxRoutines
 	c.defineBool "NLOPT_FORTRAN", false
 	c.defineBool "NLOPT_PYTHON", false
