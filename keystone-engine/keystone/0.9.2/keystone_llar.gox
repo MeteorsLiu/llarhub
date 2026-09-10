@@ -50,24 +50,23 @@ onBuild ctx => {
 
 	cmakeLists := filepath.join(ctx.SourceDir, "CMakeLists.txt")
 	cmakeSource := string(os.readFile(cmakeLists)!)
-	cmakeSource = strings.replace(cmakeSource, "cmake_minimum_required(VERSION 2.8.7)", "cmake_minimum_required(VERSION 3.5)", 1)
 	cmakeSource = strings.replace(cmakeSource, "  cmake_policy(SET CMP0051 OLD)", "  # cmake_policy(SET CMP0051 OLD)", 1)
 	os.writeFile(cmakeLists, []byte(cmakeSource), 0o644)!
 
 	llvmLists := filepath.join(ctx.SourceDir, "llvm", "CMakeLists.txt")
 	llvmSource := string(os.readFile(llvmLists)!)
-	llvmSource = strings.replace(llvmSource, "cmake_minimum_required(VERSION 2.8.7)", "cmake_minimum_required(VERSION 3.5)", 1)
 	llvmSource = strings.replace(llvmSource, "  cmake_policy(SET CMP0051 OLD)", "  # cmake_policy(SET CMP0051 OLD)", 1)
 	os.writeFile(llvmLists, []byte(llvmSource), 0o644)!
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
+	c.define "CMAKE_POLICY_VERSION_MINIMUM", "3.5"
 	c.defineBool "BUILD_LIBS_ONLY", true
 	c.defineBool "BUILD_SHARED_LIBS", shared
 	c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
 	c.defineBool "LLVM_ENABLE_PIC", fPIC
 	c.configure
-	c.build
+	c.build "--target", "keystone"
 	c.install
 
 	licenseDir := filepath.join(installDir, "licenses")
