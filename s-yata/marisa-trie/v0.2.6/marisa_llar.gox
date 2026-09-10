@@ -46,6 +46,7 @@ filter => {
 onBuild ctx => {
 	installDir := ctx.outputDir
 	cmakeLists := filepath.join(ctx.SourceDir, "CMakeLists.txt")
+	osName := target.require["os"][0]
 
 	// v0.2.6 and v0.2.7 ship Autotools only. Build those tags in-tree after
 	// generating their configure script; v0.3.0 and newer provide CMake.
@@ -89,13 +90,30 @@ onBuild ctx => {
 			cp! path, filepath.join(libDir, filepath.base(path))
 		}
 		os.removeAll(filepath.join(libDir, "libmarisa.la"))!
+		if shared && osName == "darwin" {
+			// Keep the unversioned name as an alias of the real SONAME file. The
+			// alias must not acquire a second install ID when staging is copied.
+			dylib := filepath.join(libDir, "libmarisa.0.dylib")
+			alias := filepath.join(libDir, "libmarisa.dylib")
+			os.removeAll(alias)!
+			exec! "ln", "-s", "libmarisa.0.dylib", alias
+			exec! "install_name_tool", "-id", "@rpath/libmarisa.0.dylib", dylib
+		}
 		if tools {
 			binDir := filepath.join(installDir, "bin")
 			os.mkdirAll(binDir, 0o755)!
 			for path in filepath.glob(filepath.join(stageDir, "bin", "*"))! {
 				cp! path, filepath.join(binDir, filepath.base(path))
 			}
+			if shared && osName == "darwin" {
+				oldDylib := filepath.join(stageDir, "lib", "libmarisa.0.dylib")
+				newDylib := "@loader_path/../lib/libmarisa.0.dylib"
+				for path in filepath.glob(filepath.join(binDir, "*"))! {
+					exec! "install_name_tool", "-change", oldDylib, newDylib, path
+				}
+			}
 		}
+		os.removeAll(stageDir)!
 	} else if err != nil {
 		panic err
 	} else {
@@ -120,7 +138,6 @@ onBuild ctx => {
 	os.writeFile(filepath.join(licenseDir, "COPYING.md"), os.readFile(filepath.join(ctx.SourceDir, "COPYING.md"))!, 0o644)!
 
 	libs := ["-L$${libdir}", "-lmarisa"]
-	osName := target.require["os"][0]
 	if osName == "linux" || osName == "freebsd" {
 		libs <- "-lm"
 	}
