@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 const consumerSource = `#include <qrencode.h>
@@ -129,16 +128,6 @@ onBuild ctx => {
 	shared := target.options["shared"][0] == "ON"
 	fPIC := target.options["fPIC"][0] == "ON"
 
-	cmakeLists := filepath.join(ctx.SourceDir, "CMakeLists.txt")
-	source := string(os.readFile(cmakeLists)!)
-	// PNG is only used by the qrencode CLI; Iconv is unused. Strip both
-	// lookups so the library build does not depend on optional packages.
-	source = strings.replace(source, "find_package(PNG)", "", 1)
-	source = strings.replace(source, "find_package(Iconv)", "", 1)
-	source = strings.replace(source, "install(TARGETS qrencode DESTINATION ${CMAKE_INSTALL_LIBDIR})", "install(TARGETS qrencode ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})", 1)
-	source = strings.replace(source, "install(TARGETS qrencode DESTINATION lib)", "install(TARGETS qrencode ARCHIVE DESTINATION lib LIBRARY DESTINATION lib RUNTIME DESTINATION bin)", 1)
-	os.writeFile(cmakeLists, []byte(source), 0o644)!
-
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.buildType "Release"
 	c.define "CMAKE_POLICY_VERSION_MINIMUM", "3.5"
@@ -149,6 +138,8 @@ onBuild ctx => {
 	}
 	c.defineBool "WITH_TOOLS", false
 	c.defineBool "WITH_TESTS", false
+	c.defineBool "CMAKE_DISABLE_FIND_PACKAGE_PNG", true
+	c.defineBool "CMAKE_DISABLE_FIND_PACKAGE_Iconv", true
 	c.configure
 	c.build
 	c.install
