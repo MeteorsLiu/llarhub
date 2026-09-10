@@ -21,6 +21,11 @@ defaults {
 }
 
 filter => {
+	// The current LLAR C target contract spells x86_64 as amd64. Keep 32-bit
+	// x86 out until that target is supported and validated.
+	if target.require["os"][0] != "windows" || target.require["arch"][0] != "amd64" {
+		return false
+	}
 	for name, values in target.options {
 		if name != "shared" {
 			return false
@@ -37,24 +42,8 @@ filter => {
 onBuild ctx => {
 	installDir := ctx.outputDir
 	shared := target.options["shared"][0] == "ON"
-	windows := target.require["os"][0] == "windows"
 
-	// Upstream is a Win32 x86/x64 hooking library (windows.h). Darwin/Linux CI
-	// still has to build the formula, so non-Windows installs a linkable stub
-	// that preserves the MH_* consumer API.
-	lib := "minhook"
-	if windows {
-		lib = "minhook.x64"
-		arch := target.require["arch"][0]
-		if arch == "386" || arch == "x86" || arch == "i386" {
-			lib = "minhook.x32"
-		}
-	} else {
-		os.mkdirAll(filepath.join(ctx.SourceDir, "include"), 0o755)!
-		os.writeFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"), ctx.Proj.readFile("v1.3.4/CMakeLists.txt")!, 0o644)!
-		os.writeFile(filepath.join(ctx.SourceDir, "minhook_stub.c"), ctx.Proj.readFile("v1.3.4/minhook_stub.c")!, 0o644)!
-		os.writeFile(filepath.join(ctx.SourceDir, "include", "MinHook.h"), ctx.Proj.readFile("v1.3.4/MinHook.h")!, 0o644)!
-	}
+	lib := "minhook.x64"
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.buildType "Release"
@@ -101,9 +90,5 @@ onTest ctx => {
 	binary := filepath.join(testDir, "consumer")
 	cc! sourcePath, "-o", binary, "@"+flagsFile
 
-	if target.options["shared"][0] == "ON" {
-		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
-		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
-	}
 	exec! binary
 }
