@@ -21,9 +21,10 @@ defaults {
 }
 
 filter => {
-	// The current LLAR C target contract spells x86_64 as amd64. Keep 32-bit
-	// x86 out until that target is supported and validated.
-	if target.require["os"][0] != "windows" || target.require["arch"][0] != "amd64" {
+	// Upstream MinHook has separate x64 and x86 libraries. The current LLAR
+	// matrix spellings for those targets are amd64 and 386.
+	arch := target.require["arch"][0]
+	if target.require["os"][0] != "windows" || (arch != "amd64" && arch != "386") {
 		return false
 	}
 	for name, values in target.options {
@@ -44,6 +45,9 @@ onBuild ctx => {
 	shared := target.options["shared"][0] == "ON"
 
 	lib := "minhook.x64"
+	if target.require["arch"][0] == "386" {
+		lib = "minhook.x32"
+	}
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.buildType "Release"
