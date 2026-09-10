@@ -81,13 +81,6 @@ onBuild ctx => {
 	shared := target.options["shared"][0] == "ON"
 	fPIC := target.options["fPIC"][0] == "ON"
 
-	// The upstream Git checkout does not populate the libatomic_ops submodule.
-	// The Conan patch teaches the MSVC branch to use the direct LLAR dependency.
-	patch := ctx.Proj.readFile("v8.2.2/find-atomic-ops.patch")!
-	patchPath := filepath.join(ctx.SourceDir, "_llar_find_atomic_ops.patch")
-	os.writeFile(patchPath, patch, 0o644)!
-	git! "-C", ctx.SourceDir, "apply", patchPath
-
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.buildType "Release"
 	c.define "CMAKE_POLICY_VERSION_MINIMUM", "3.5"
@@ -101,6 +94,11 @@ onBuild ctx => {
 	c.defineBool "install_headers", true
 	for dep in ctx.Proj.Deps {
 		c.use ctx.outputDir(dep)
+	}
+	if target.require["os"][0] == "windows" {
+		for dep in ctx.Proj.Deps {
+			c.define "CFLAGS_EXTRA", "-I"+filepath.join(ctx.outputDir(dep), "include")
+		}
 	}
 	c.configure
 	c.build
