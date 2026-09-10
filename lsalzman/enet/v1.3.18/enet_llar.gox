@@ -179,13 +179,13 @@ onBuild ctx => {
 	}
 	os.removeAll(filepath.join(libDir, "libenet.la"))!
 	if shared && osName == "darwin" {
-		for entry in os.readDir(libDir)! {
-			if entry.isDir || entry.Type() & os.ModeSymlink != 0 || !entry.name.hasSuffix(".dylib") {
-				continue
-			}
-			path := filepath.join(libDir, entry.name)
-			exec! "install_name_tool", "-id", path, path
-		}
+		dylib := filepath.join(libDir, "libenet.7.dylib")
+		// Keep the unversioned name as an alias of the real SONAME file. The
+		// alias must not acquire a second install ID when staging is copied.
+		alias := filepath.join(libDir, "libenet.dylib")
+		os.removeAll(alias)!
+		exec! "ln", "-s", "libenet.7.dylib", alias
+		exec! "install_name_tool", "-id", "@rpath/libenet.7.dylib", dylib
 	}
 	os.removeAll(stageDir)!
 
