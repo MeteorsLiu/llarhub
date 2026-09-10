@@ -47,8 +47,6 @@ onBuild ctx => {
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.buildType "Release"
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
-	// FAST_BUILD's default ON path omits the main library from installation.
-	c.defineBool "FAST_BUILD", false
 	c.defineBool "BUILD_TESTING", false
 	c.defineBool "BUILD_SHARED_LIBS", false
 	for dep in ctx.Proj.Deps {
