@@ -43,13 +43,12 @@ onBuild ctx => {
 	installDir := ctx.outputDir
 	shared := target.options["shared"][0] == "ON"
 
-	// Conan's patch removes the executable subtrees so install only publishes
-	// LASlib. The upstream tags use these two root-CMake forms.
+	// Remove the executable subtrees so the existing install rules publish only
+	// LASlib for this fixed upstream root layout.
 	cmakeLists := filepath.join(ctx.SourceDir, "CMakeLists.txt")
 	source := string(os.readFile(cmakeLists)!)
 	original := source
 	source = strings.replace(source, "\nadd_subdirectory(src)\nif (EXISTS src_full)\n\tadd_subdirectory(src_full)\nendif()\n", "\n", 1)
-	source = strings.replace(source, "\nif (NOT BUILD_SHARED_LIBS)\nadd_subdirectory(src)\nendif()\n", "\n", 1)
 	if source == original {
 		panic "unsupported LAStools root CMake layout"
 	}
