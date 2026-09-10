@@ -34,6 +34,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_11)
+target_compile_definitions(${PROJECT_NAME} PUBLIC IMGUI_USER_CONFIG=\"imgui_export_headers.h\")
 
 include(GNUInstallDirs)
 

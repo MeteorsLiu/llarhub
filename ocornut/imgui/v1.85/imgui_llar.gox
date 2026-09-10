@@ -1,7 +1,6 @@
 import (
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 const consumerSource = `#include <imgui.h>
@@ -52,16 +51,6 @@ onBuild ctx => {
 
 	cmakeLists := ctx.Proj.readFile("v1.85/CMakeLists.txt")!
 	os.writeFile(filepath.join(ctx.SourceDir, "CMakeLists.txt"), cmakeLists, 0o644)!
-
-	headerPath := filepath.join(ctx.SourceDir, "imgui.h")
-	header := string(os.readFile(headerPath)!)
-	header = strings.replace(
-		header,
-		"#ifdef IMGUI_USER_CONFIG",
-		"#include \"imgui_export_headers.h\"\n\n#ifdef IMGUI_USER_CONFIG",
-		1,
-	)
-	os.writeFile(headerPath, []byte(header), 0o644)!
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
@@ -116,7 +105,7 @@ onBuild ctx => {
 		description = "Bloat-free Immediate Mode Graphical User interface for C++ with minimal dependencies",
 		version = "v1.85",
 		libs = libs,
-		cflags = ["-I$${includedir}"],
+		cflags = ["-I$${includedir}", "-DIMGUI_USER_CONFIG=\\\"imgui_export_headers.h\\\""],
 	)!
 	out := os.create(filepath.join(pcDir, "imgui.pc"))!
 	pc.writeTo(out)!
