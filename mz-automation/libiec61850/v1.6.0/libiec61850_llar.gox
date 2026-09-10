@@ -2,7 +2,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 )
 
 const consumerSource = `#include <iostream>
@@ -48,27 +47,6 @@ onBuild ctx => {
 	shared := target.options["shared"][0] == "ON"
 	fPIC := target.options["fPIC"][0] == "ON"
 
-	// Conan installs only the selected library pair. The upstream build still
-	// declares both pairs, so select the matching install rules before CMake
-	// configures the source tree.
-	halLists := filepath.join(ctx.SourceDir, "hal", "CMakeLists.txt")
-	halSource := string(os.readFile(halLists)!)
-	if shared {
-		halSource = strings.replace(halSource, "install (TARGETS hal hal-shared", "install (TARGETS hal-shared", 1)
-	} else {
-		halSource = strings.replace(halSource, "install (TARGETS hal hal-shared", "install (TARGETS hal", 1)
-	}
-	os.writeFile(halLists, []byte(halSource), 0o644)!
-
-	srcLists := filepath.join(ctx.SourceDir, "src", "CMakeLists.txt")
-	srcSource := string(os.readFile(srcLists)!)
-	if shared {
-		srcSource = strings.replace(srcSource, "install (TARGETS iec61850 iec61850-shared", "install (TARGETS iec61850-shared", 1)
-	} else {
-		srcSource = strings.replace(srcSource, "install (TARGETS iec61850 iec61850-shared", "install (TARGETS iec61850", 1)
-	}
-	os.writeFile(srcLists, []byte(srcSource), 0o644)!
-
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
 	c.defineBool "BUILD_EXAMPLES", false
@@ -76,12 +54,9 @@ onBuild ctx => {
 		c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
 	}
 	c.configure
-
-	buildTarget := "iec61850"
-	if shared {
-		buildTarget = "iec61850-shared"
-	}
-	c.build "--target", buildTarget
+	// Build both upstream library pairs so the existing install rules remain
+	// intact; pkg-config below selects the requested public pair.
+	c.build
 	c.install
 
 	// The upstream .pc is absolute and is installed under share/pkgconfig.
