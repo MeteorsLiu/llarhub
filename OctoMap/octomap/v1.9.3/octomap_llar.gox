@@ -157,19 +157,53 @@ onBuild ctx => {
 
 	cmakeLists := filepath.join(sourceDir, "CMakeLists.txt")
 	source := string(os.readFile(cmakeLists)!)
-	source = strings.replace(source, `SET( BASE_DIR ${CMAKE_SOURCE_DIR} )`, `SET( BASE_DIR ${CMAKE_BINARY_DIR} )`, 1)
+	source = strings.replace(source, `IF(WIN32)
+  set(OCTOMAP_LIBRARY
+    "$${CMAKE_IMPORT_LIBRARY_PREFIX}octomap$${CMAKE_IMPORT_LIBRARY_SUFFIX}"
+  )
+  set(OCTOMATH_LIBRARY
+    "$${CMAKE_IMPORT_LIBRARY_PREFIX}octomath$${CMAKE_IMPORT_LIBRARY_SUFFIX}"
+  )
+ELSE()
+  set(OCTOMAP_LIBRARY
+    "$${CMAKE_SHARED_LIBRARY_PREFIX}octomap$${CMAKE_SHARED_LIBRARY_SUFFIX}"
+  )
+  set(OCTOMATH_LIBRARY
+    "$${CMAKE_SHARED_LIBRARY_PREFIX}octomath$${CMAKE_SHARED_LIBRARY_SUFFIX}"
+  )
+ENDIF()`, `IF(BUILD_SHARED_LIBS)
+  IF(WIN32)
+    set(OCTOMAP_LIBRARY
+      "$${CMAKE_IMPORT_LIBRARY_PREFIX}octomap$${CMAKE_IMPORT_LIBRARY_SUFFIX}"
+    )
+    set(OCTOMATH_LIBRARY
+      "$${CMAKE_IMPORT_LIBRARY_PREFIX}octomath$${CMAKE_IMPORT_LIBRARY_SUFFIX}"
+    )
+  ELSE()
+    set(OCTOMAP_LIBRARY
+      "$${CMAKE_SHARED_LIBRARY_PREFIX}octomap$${CMAKE_SHARED_LIBRARY_SUFFIX}"
+    )
+    set(OCTOMATH_LIBRARY
+      "$${CMAKE_SHARED_LIBRARY_PREFIX}octomap$${CMAKE_SHARED_LIBRARY_SUFFIX}"
+    )
+  ENDIF()
+ELSE()
+  set(OCTOMAP_LIBRARY
+    "$${CMAKE_STATIC_LIBRARY_PREFIX}octomap$${CMAKE_STATIC_LIBRARY_SUFFIX}"
+  )
+  set(OCTOMATH_LIBRARY
+    "$${CMAKE_STATIC_LIBRARY_PREFIX}octomath$${CMAKE_STATIC_LIBRARY_SUFFIX}"
+  )
+ENDIF()`, 1)
 	os.writeFile(cmakeLists, []byte(source), 0o644)!
 
-	compilerSettings := filepath.join(sourceDir, "CMakeModules", "CompilerSettings.cmake")
-	source = string(os.readFile(compilerSettings)!)
-	source = strings.replace(source, `ADD_DEFINITIONS(-fPIC)
+	if !fPIC {
+		compilerSettings := filepath.join(sourceDir, "CMakeModules", "CompilerSettings.cmake")
+		source = string(os.readFile(compilerSettings)!)
+		source = strings.replace(source, `ADD_DEFINITIONS(-fPIC)
 `, "", 1)
-	source = strings.replace(source, ` -Werror`, "", 1)
-	source = strings.replace(source, `set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
-`, "", 1)
-	source = strings.replace(source, `set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
-`, "", 1)
-	os.writeFile(compilerSettings, []byte(source), 0o644)!
+		os.writeFile(compilerSettings, []byte(source), 0o644)!
+	}
 
 	srcCMakeLists := filepath.join(sourceDir, "src", "CMakeLists.txt")
 	os.writeFile(srcCMakeLists, []byte(srcCMakeListsSource()), 0o644)!
@@ -181,6 +215,7 @@ onBuild ctx => {
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
 	c.define "CMAKE_POLICY_VERSION_MINIMUM", "3.5"
 	c.define "CMAKE_CXX_STANDARD", "11"
+	c.defineBool "CMAKE_SKIP_RPATH", true
 	c.defineBool "BUILD_TESTING", false
 	c.defineBool "BUILD_SHARED_LIBS", shared
 	c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", fPIC
