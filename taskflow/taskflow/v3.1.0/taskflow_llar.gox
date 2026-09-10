@@ -49,17 +49,6 @@ onBuild ctx => {
 	includeDir := filepath.join(installDir, "include")
 	copyTree filepath.join(ctx.SourceDir, "taskflow"), filepath.join(includeDir, "taskflow")
 
-	// Conan's 3.3.0 portability patch guards the x86-only immintrin.h header.
-	osHeader := filepath.join(includeDir, "taskflow", "utility", "os.hpp")
-	osSource := string(os.readFile(osHeader)!)
-	osSource = strings.replace(
-		osSource,
-		"\n#if __has_include (<immintrin.h>)",
-		"\n#if (defined(__i386__) || defined(__x86_64__)) && __has_include (<immintrin.h>)",
-		1,
-	)
-	os.writeFile(osHeader, []byte(osSource), 0o644)!
-
 	licenseDir := filepath.join(installDir, "licenses")
 	os.mkdirAll(licenseDir, 0o755)!
 	os.writeFile(filepath.join(licenseDir, "LICENSE"), os.readFile(filepath.join(ctx.SourceDir, "LICENSE"))!, 0o644)!
