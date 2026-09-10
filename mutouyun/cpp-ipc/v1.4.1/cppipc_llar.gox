@@ -23,6 +23,9 @@ defaults {
 }
 
 filter => {
+	if target.require["os"][0] == "darwin" {
+		return false
+	}
 	for name, values in target.options {
 		if name != "shared" && name != "fPIC" {
 			return false
@@ -48,112 +51,6 @@ onBuild ctx => {
 	source = strings.replace(source, "set(CMAKE_POSITION_INDEPENDENT_CODE ON)\n", "", 1)
 	os.writeFile(cmakeLists, []byte(source), 0o644)!
 
-	// v1.4.1 only defines IPC_OS_* for win/linux/qnx/freebsd. Treat Darwin as
-	// POSIX so shm/condition/mutex use the existing posix backends.
-	detail := filepath.join(ctx.SourceDir, "src", "libipc", "platform", "detail.h")
-	detailSrc := string(os.readFile(detail)!)
-	if !detailSrc.contains("defined(__APPLE__)") {
-		panic "cpp-ipc detail.h has no __APPLE__ branch"
-	}
-	detailSrc = strings.replace(detailSrc, "defined(__APPLE__)", "defined(__APPLE__)\n#   define IPC_OS_DARWIN_", 1)
-	if !detailSrc.contains("IPC_OS_DARWIN_") {
-		panic "failed to define IPC_OS_DARWIN_ in detail.h"
-	}
-	darwinShims := `
-#ifdef IPC_OS_DARWIN_
-#include <errno.h>
-#include <time.h>
-#include <pthread.h>
-#include <semaphore.h>
-#ifndef PTHREAD_MUTEX_ROBUST
-#define PTHREAD_MUTEX_ROBUST 0
-#endif
-#ifndef EOWNERDEAD
-#define EOWNERDEAD 0
-#endif
-static inline int pthread_mutexattr_setrobust(pthread_mutexattr_t *attr, int robust) {
-    (void)attr;
-    (void)robust;
-    return 0;
-}
-static inline int pthread_mutex_consistent(pthread_mutex_t *mutex) {
-    (void)mutex;
-    return 0;
-}
-static inline int pthread_mutex_timedlock(pthread_mutex_t *mutex, const struct timespec *abs_timeout) {
-    int rc;
-    struct timespec now, remain;
-    while ((rc = pthread_mutex_trylock(mutex)) == EBUSY) {
-        if (clock_gettime(CLOCK_REALTIME, &now) != 0) {
-            return errno;
-        }
-        if (now.tv_sec > abs_timeout->tv_sec ||
-            (now.tv_sec == abs_timeout->tv_sec && now.tv_nsec >= abs_timeout->tv_nsec)) {
-            return ETIMEDOUT;
-        }
-        remain.tv_sec = abs_timeout->tv_sec - now.tv_sec;
-        remain.tv_nsec = abs_timeout->tv_nsec - now.tv_nsec;
-        if (remain.tv_nsec < 0) {
-            remain.tv_sec -= 1;
-            remain.tv_nsec += 1000000000L;
-        }
-        if (remain.tv_sec > 0 || remain.tv_nsec > 1000000L) {
-            remain.tv_nsec = 1000000L;
-            remain.tv_sec = 0;
-        }
-        nanosleep(&remain, 0);
-    }
-    return rc;
-}
-static inline int sem_timedwait(sem_t *sem, const struct timespec *abs_timeout) {
-    struct timespec now, remain;
-    while (sem_trywait(sem) != 0) {
-        if (errno != EAGAIN) {
-            return -1;
-        }
-        if (clock_gettime(CLOCK_REALTIME, &now) != 0) {
-            return -1;
-        }
-        if (now.tv_sec > abs_timeout->tv_sec ||
-            (now.tv_sec == abs_timeout->tv_sec && now.tv_nsec >= abs_timeout->tv_nsec)) {
-            errno = ETIMEDOUT;
-            return -1;
-        }
-        remain.tv_sec = 0;
-        remain.tv_nsec = 1000000L;
-        nanosleep(&remain, 0);
-    }
-    return 0;
-}
-#endif
-`
-	if !detailSrc.contains("pthread_mutex_timedlock") {
-		marker := "#endif // LIBIPC_SRC_PLATFORM_DETAIL_H_"
-		if !detailSrc.contains(marker) {
-			panic "cpp-ipc detail.h missing include guard end"
-		}
-		detailSrc = strings.replace(detailSrc, marker, darwinShims+marker, 1)
-	}
-	os.writeFile(detail, []byte(detailSrc), 0o644)!
-
-	oldGuard := "defined(IPC_OS_FREEBSD_)"
-	newGuard := "defined(IPC_OS_FREEBSD_) || defined(IPC_OS_DARWIN_)"
-	for rel in []string{
-		"src/libipc/sync/condition.cpp",
-		"src/libipc/sync/mutex.cpp",
-		"src/libipc/sync/waiter.cpp",
-		"src/libipc/sync/semaphore.cpp",
-		"src/libipc/platform/platform.cpp",
-		"src/libipc/platform/platform.c",
-	} {
-		full := filepath.join(ctx.SourceDir, rel)
-		src := string(os.readFile(full)!)
-		if !src.contains(oldGuard) {
-			panic "missing freebsd platform guard in " + rel
-		}
-		os.writeFile(full, []byte(strings.replaceAll(src, oldGuard, newGuard)), 0o644)!
-	}
-
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.buildType "Release"
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
@@ -176,8 +73,6 @@ static inline int sem_timedwait(sem_t *sem, const struct timespec *abs_timeout) 
 		libs <- "-lrt"
 		libs <- "-lpthread"
 		libs <- "-lm"
-	} else if osName == "darwin" {
-		libs <- "-lpthread"
 	}
 
 	cflags := ["-I$${includedir}"]
@@ -219,7 +114,6 @@ onTest ctx => {
 
 	if target.options["shared"][0] == "ON" {
 		os.setenv("LD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
-		os.setenv("DYLD_LIBRARY_PATH", filepath.join(installDir, "lib"))!
 	}
 	exec! binary
 }
