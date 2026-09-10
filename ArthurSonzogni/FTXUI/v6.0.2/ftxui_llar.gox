@@ -56,14 +56,16 @@ onBuild ctx => {
 	shared := target.options["shared"][0] == "ON"
 	fPIC := target.options["fPIC"][0] == "ON"
 
-	optionsPath := filepath.join(ctx.SourceDir, "cmake", "ftxui_set_options.cmake")
-	source := string(os.readFile(optionsPath)!)
-	picLine := "set_property(TARGET " + "$" + "{library} PROPERTY POSITION_INDEPENDENT_CODE ON)"
-	if !strings.contains(source, picLine) {
-		panic "FTXUI source does not contain the Conan 6.0.2 PIC patch target"
+	if !shared && !fPIC {
+		optionsPath := filepath.join(ctx.SourceDir, "cmake", "ftxui_set_options.cmake")
+		source := string(os.readFile(optionsPath)!)
+		picLine := "set_property(TARGET " + "$" + "{library} PROPERTY POSITION_INDEPENDENT_CODE ON)"
+		if !strings.contains(source, picLine) {
+			panic "FTXUI source does not contain the Conan 6.0.2 PIC patch target"
+		}
+		source = strings.replace(source, picLine, "# "+picLine, 1)
+		os.writeFile(optionsPath, []byte(source), 0o644)!
 	}
-	source = strings.replace(source, picLine, "# "+picLine, 1)
-	os.writeFile(optionsPath, []byte(source), 0o644)!
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.defineBool "BUILD_SHARED_LIBS", shared
