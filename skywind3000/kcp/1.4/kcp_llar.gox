@@ -146,17 +146,19 @@ onBuild ctx => {
 	shared := target.options["shared"][0] == "ON"
 	fPIC := target.options["fPIC"][0] == "ON"
 
-	// 1.4-1.7 hard-code a STATIC target and only install ARCHIVE. Later tags
-	// already honor BUILD_SHARED_LIBS and install LIBRARY/RUNTIME.
-	cmakeLists := filepath.join(ctx.SourceDir, "CMakeLists.txt")
-	source := string(os.readFile(cmakeLists)!)
-	source = strings.replace(source, "add_library(kcp STATIC ikcp.c)", "add_library(kcp ikcp.c)", 1)
-	if !strings.contains(source, "LIBRARY DESTINATION") {
-		source = strings.replace(source, "ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}", "ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}\n    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}\n    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}", 1)
+	// Upstream v1.4 declares a STATIC target. Rewrite it only for the public
+	// shared option; the default static build can use the source unchanged.
+	if shared {
+		cmakeLists := filepath.join(ctx.SourceDir, "CMakeLists.txt")
+		source := string(os.readFile(cmakeLists)!)
+		source = strings.replace(source, "add_library(kcp STATIC ikcp.c)", "add_library(kcp ikcp.c)", 1)
+		if !strings.contains(source, "LIBRARY DESTINATION") {
+			source = strings.replace(source, "ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}", "ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}\n    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}\n    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}", 1)
+		}
+		// 1.7.1+ raise cmake_minimum_required to 4.0 without using CMake 4 features.
+		source = strings.replace(source, "CMAKE_MINIMUM_REQUIRED(VERSION 4.0)", "CMAKE_MINIMUM_REQUIRED(VERSION 3.5)", 1)
+		os.writeFile(cmakeLists, []byte(source), 0o644)!
 	}
-	// 1.7.1+ raise cmake_minimum_required to 4.0 without using CMake 4 features.
-	source = strings.replace(source, "CMAKE_MINIMUM_REQUIRED(VERSION 4.0)", "CMAKE_MINIMUM_REQUIRED(VERSION 3.5)", 1)
-	os.writeFile(cmakeLists, []byte(source), 0o644)!
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.buildType "Release"
