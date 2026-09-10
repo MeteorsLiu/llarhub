@@ -84,12 +84,8 @@ onBuild ctx => {
 	patches := []string{}
 	if strings.contains(source, "Qhull/QhullConfigVersion.cmake") {
 		patches <- "0001-fix-cmake-conflict-exec-dir.patch"
-		patches <- "0002-fix-cmake-minimum-required-location-7.3.2.patch"
 		patches <- "0003-fix-cmake-7.3.2.patch"
 	} else {
-		if strings.contains(source, "cmake_minimum_required(VERSION 3.0)") {
-			patches <- "0002-fix-cmake-minimum-required-location-8.0.1.patch"
-		}
 		if !strings.contains(source, "option(BUILD_SHARED_LIBS") {
 			patches <- "0003-fix-cmake-8.0.x.patch"
 		}
@@ -108,6 +104,7 @@ onBuild ctx => {
 	fPIC := target.options["fPIC"][0] == "ON"
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
+	c.define "CMAKE_POLICY_VERSION_MINIMUM", "3.5"
 	c.define "CMAKE_INSTALL_LIBDIR", "lib"
 	c.define "LIB_INSTALL_DIR", "lib"
 	c.defineBool "BUILD_SHARED_LIBS", shared
