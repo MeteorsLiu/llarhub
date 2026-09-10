@@ -64,21 +64,6 @@ onBuild ctx => {
 	installDir := ctx.outputDir
 	shared := target.options["shared"][0] == "ON"
 	withUtils := target.options["with_utils"][0] == "ON"
-	destDir := strings.replace(installDir, "|", "\\|", -1)
-
-	for relativePath in ["src/Makefile", "utils/Makefile"] {
-		makefilePath := filepath.join(ctx.SourceDir, relativePath)
-		source := string(os.readFile(makefilePath)!)
-		source = strings.replace(source, "CC = $(CROSS_COMPILE)gcc\n", "", 1)
-		os.writeFile(makefilePath, []byte(source), 0o644)!
-	}
-
-	sourcePath := filepath.join(ctx.SourceDir, "src", "Makefile")
-	source := string(os.readFile(sourcePath)!)
-	source = strings.replace(source, "AR = $(CROSS_COMPILE)ar\n", "", 1)
-	source = strings.replace(source, "LD = $(CROSS_COMPILE)gcc\n", "", 1)
-	source = strings.replace(source, "$(LD) $(LDFLAGS)", "$(CC) $(LDFLAGS)", 1)
-	os.writeFile(sourcePath, []byte(source), 0o644)!
 
 	mixerPath := filepath.join(ctx.SourceDir, "src", "mixer_plugin.c")
 	mixer := string(os.readFile(mixerPath)!)
@@ -98,35 +83,16 @@ onBuild ctx => {
     ((char *)info->subname)[sizeof(info->subname) - 1] = '\0';`, 1)
 	os.writeFile(pcmPath, []byte(pcm), 0o644)!
 
-	capout => { exec! filepath.join(ctx.SourceDir, "scripts", "version.sh"), "-s", "print", "major" }
-	versionMajor := output.trimSpace
-	capout => { exec! filepath.join(ctx.SourceDir, "scripts", "version.sh"), "-s", "print" }
-	version := output.trimSpace
-
-	a := autotools.new(ctx.SourceDir, ctx.SourceDir, installDir)
-	a.build "-C", "src", "TINYALSA_VERSION_MAJOR="+versionMajor, "TINYALSA_VERSION="+version
-	if withUtils {
-		a.build "-C", "utils"
-	}
-	a.install "-C", "src", "TINYALSA_VERSION_MAJOR="+versionMajor, "TINYALSA_VERSION="+version, "DESTDIR="+destDir, "PREFIX="
-	if withUtils {
-		a.install "-C", "utils", "DESTDIR="+destDir, "PREFIX="
-	}
-
-	libDir := filepath.join(installDir, "lib")
-	if shared {
-		os.remove(filepath.join(libDir, "libtinyalsa.a"))!
-	} else {
-		for sharedPath in filepath.glob(filepath.join(libDir, "libtinyalsa.so*"))! {
-			os.remove(sharedPath)!
-		}
-	}
-
-	includeDir := filepath.join(installDir, "include", "tinyalsa")
-	os.mkdirAll(includeDir, 0o755)!
-	for headerPath in filepath.glob(filepath.join(ctx.SourceDir, "include", "tinyalsa", "*.h"))! {
-		cp! headerPath, filepath.join(includeDir, filepath.base(headerPath))
-	}
+	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
+	c.define "CMAKE_INSTALL_LIBDIR", "lib"
+	c.define "CMAKE_POLICY_VERSION_MINIMUM", "3.5"
+	c.defineBool "BUILD_SHARED_LIBS", shared
+	c.defineBool "TINYALSA_BUILD_EXAMPLES", false
+	c.defineBool "TINYALSA_BUILD_UTILS", withUtils
+	c.defineBool "CMAKE_POSITION_INDEPENDENT_CODE", true
+	c.configure
+	c.build
+	c.install
 
 	licenseDir := filepath.join(installDir, "licenses")
 	os.mkdirAll(licenseDir, 0o755)!
