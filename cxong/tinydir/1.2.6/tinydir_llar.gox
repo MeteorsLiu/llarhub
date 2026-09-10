@@ -37,7 +37,7 @@ int main(void)
 
 id "cxong/tinydir"
 
-fromVer "1.2.4"
+fromVer "1.2.6"
 
 onBuild ctx => {
 	installDir := ctx.outputDir
@@ -54,7 +54,7 @@ onBuild ctx => {
 	pc := pkgconfig.new(
 		name = "tinydir",
 		description = "Lightweight, portable and easy to integrate C directory and file reader",
-		version = "1.2.4",
+		version = "1.2.6",
 		cflags = ["-I$${includedir}"],
 	)!
 	out := os.create(filepath.join(pcDir, "tinydir.pc"))!
