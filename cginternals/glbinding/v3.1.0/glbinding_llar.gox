@@ -41,17 +41,10 @@ onBuild ctx => {
 	shared := target.options["shared"][0] == "ON"
 	fPIC := target.options["fPIC"][0] == "ON"
 
-	cmakeLists := filepath.join(ctx.SourceDir, "CMakeLists.txt")
-	source := string(os.readFile(cmakeLists)!)
-	source = strings.replace(source, `set(INSTALL_ROOT      ".")`, `set(INSTALL_ROOT      "share")`, 1)
-	source = strings.replace(source, `set(INSTALL_BIN       ".")`, `set(INSTALL_BIN       "bin")`, 1)
-	source = strings.replace(source, "if(NOT SYSTEM_DIR_INSTALL)", "if(0)", 1)
-	os.writeFile(cmakeLists, []byte(source), 0o644)!
-
 	compileOptions := filepath.join(ctx.SourceDir, "cmake", "CompileOptions.cmake")
-	source = string(os.readFile(compileOptions)!)
-	source = strings.replace(source, "POSITION_INDEPENDENT_CODE ON", "", 1)
-	os.writeFile(compileOptions, []byte(source), 0o644)!
+	compileSource := string(os.readFile(compileOptions)!)
+	compileSource = strings.replace(compileSource, "POSITION_INDEPENDENT_CODE ON", "", 1)
+	os.writeFile(compileOptions, []byte(compileSource), 0o644)!
 
 	c := cmake.new(ctx.SourceDir, filepath.join(ctx.SourceDir, "_build"), installDir)
 	c.defineBool "BUILD_SHARED_LIBS", shared
