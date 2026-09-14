@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-  pull_request:
 
 permissions:
   contents: read
@@ -91,23 +90,6 @@ jobs:
           echo "GOMODCACHE=${RUNNER_TEMP}/go/pkg/mod" >> "$GITHUB_ENV"
           echo "GOCACHE=${RUNNER_TEMP}/go-build-cache" >> "$GITHUB_ENV"
 
-      - name: Install Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y autoconf automake build-essential ca-certificates cmake curl gperf groff patch
-
-      - name: Install LLVM 19
-        run: |
-          curl --fail --silent --show-error --location \
-            https://apt.llvm.org/llvm-snapshot.gpg.key \
-            --output "$RUNNER_TEMP/apt.llvm.org.asc"
-          sudo install -m 644 "$RUNNER_TEMP/apt.llvm.org.asc" /usr/share/keyrings/apt.llvm.org.asc
-          echo "deb [signed-by=/usr/share/keyrings/apt.llvm.org.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-19 main" \
-            | sudo tee /etc/apt/sources.list.d/llvm19.list
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang-19 lld-19 llvm-19
-          echo "/usr/lib/llvm-19/bin" >> "$GITHUB_PATH"
-
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
@@ -122,16 +104,10 @@ jobs:
 
       - name: Prebuild changed modules
         shell: bash
-        env:
-          LLARD_KODO_ACCESS_KEY: ${{ secrets.QINIU_ACCESS_KEY }}
-          LLARD_KODO_SECRET_KEY: ${{ secrets.QINIU_SECRET_KEY }}
-          LLARD_KODO_BUCKET: ${{ secrets.QINIU_BUCKET }}
-          LLARD_KODO_PUBLIC_DOMAIN: ${{ secrets.QINIU_PUBLIC_DOMAIN }}
-          LLARD_KODO_PREFIX: ${{ secrets.QINIU_PREFIX }}
         run: |
           while IFS= read -r module; do
             [ -n "$module" ] || continue
-            llar make --verbose "./$module" \
+            llar install --verbose "$module" \
               --os "${{ matrix.goos }}" \
               --arch "${{ matrix.goarch }}"
           done < <(jq -r '.[]' <<< '${{ needs.changes.outputs.modules }}')
@@ -231,14 +207,15 @@ jobs:
           rm -rf "$HOME/.cache/.llar/workspaces"
           rm -rf "$HOME/Library/Caches/.llar/workspaces"
 
+      - name: Download prebuilt artifact
+        shell: bash
+        run: |
+          llar install --verbose "${{ matrix.module }}" \
+            --os "${{ matrix.goos }}" \
+            --arch "${{ matrix.goarch }}"
+
       - name: Run onTest against prebuilt artifact
         shell: bash
-        env:
-          LLARD_KODO_ACCESS_KEY: ${{ secrets.QINIU_ACCESS_KEY }}
-          LLARD_KODO_SECRET_KEY: ${{ secrets.QINIU_SECRET_KEY }}
-          LLARD_KODO_BUCKET: ${{ secrets.QINIU_BUCKET }}
-          LLARD_KODO_PUBLIC_DOMAIN: ${{ secrets.QINIU_PUBLIC_DOMAIN }}
-          LLARD_KODO_PREFIX: ${{ secrets.QINIU_PREFIX }}
         run: |
           llar test --verbose "./${{ matrix.module }}" \
             --os "${{ matrix.goos }}" \
