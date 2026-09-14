@@ -1,0 +1,336 @@
+name: Prebuild artifacts
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prebuild-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Prebuilt sysroot artifacts used by Linux amd64 cross builds.
+  PREBUILT_SYSROOT_URL: http://llarpackages.xgo.dev
+
+jobs:
+  changes:
+    name: Find changed modules
+    runs-on: [qiniu, ubuntu-24.04]
+    outputs:
+      modules: ${{ steps.modules.outputs.modules }}
+      has_modules: ${{ steps.modules.outputs.has_modules }}
+
+    steps:
+      - name: Check out formulas
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Configure Qiniu Go environment
+        shell: bash
+        run: |
+          echo "GOPATH=${RUNNER_TEMP}/go" >> "$GITHUB_ENV"
+          echo "GOBIN=${RUNNER_TEMP}/go/bin" >> "$GITHUB_ENV"
+          echo "GOMODCACHE=${RUNNER_TEMP}/go/pkg/mod" >> "$GITHUB_ENV"
+          echo "GOCACHE=${RUNNER_TEMP}/go-build-cache" >> "$GITHUB_ENV"
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: 1.25.0
+          cache: false
+
+      - name: Find changed modules
+        id: modules
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.after }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          go install -tags=linknamefix -ldflags="-checklinkname=0" github.com/goplus/ixgo/cmd/ixgo@latest
+          "$(go env GOPATH)/bin/ixgo" run .github/scripts/find_changed_modules.gsh
+
+  prebuild:
+    name: Prebuild ${{ matrix.target }} on linux-amd64
+    needs: changes
+    if: needs.changes.outputs.has_modules == 'true'
+    runs-on: [qiniu, ubuntu-24.04]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: amd64-darwin
+            goos: darwin
+            goarch: amd64
+            sysroot_module: joseluisq/macosx-sdks
+            sysroot_version: "14.5"
+            sysroot_matrix: amd64-darwin
+          - target: arm64-darwin
+            goos: darwin
+            goarch: arm64
+            sysroot_module: joseluisq/macosx-sdks
+            sysroot_version: "14.5"
+            sysroot_matrix: arm64-darwin
+          - target: arm64-linux
+            goos: linux
+            goarch: arm64
+            sysroot_module: bminor/glibc
+            sysroot_version: glibc-2.27
+            sysroot_matrix: arm64-linux
+
+    steps:
+      - name: Check out formulas
+        uses: actions/checkout@v7
+
+      - name: Check out llar
+        uses: actions/checkout@v7
+        with:
+          repository: goplus/llar
+          ref: main
+          path: .llar-source
+
+      - name: Configure Qiniu Go environment
+        shell: bash
+        run: |
+          echo "GOPATH=${RUNNER_TEMP}/go" >> "$GITHUB_ENV"
+          echo "GOBIN=${RUNNER_TEMP}/go/bin" >> "$GITHUB_ENV"
+          echo "GOMODCACHE=${RUNNER_TEMP}/go/pkg/mod" >> "$GITHUB_ENV"
+          echo "GOCACHE=${RUNNER_TEMP}/go-build-cache" >> "$GITHUB_ENV"
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake build-essential ca-certificates cmake curl gperf groff patch
+
+      - name: Install LLVM 19
+        run: |
+          curl --fail --silent --show-error --location \
+            https://apt.llvm.org/llvm-snapshot.gpg.key \
+            --output "$RUNNER_TEMP/apt.llvm.org.asc"
+          sudo install -m 644 "$RUNNER_TEMP/apt.llvm.org.asc" /usr/share/keyrings/apt.llvm.org.asc
+          echo "deb [signed-by=/usr/share/keyrings/apt.llvm.org.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-19 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm19.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-19 lld-19 llvm-19
+          echo "/usr/lib/llvm-19/bin" >> "$GITHUB_PATH"
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: .llar-source/go.mod
+          cache: false
+
+      - name: Install llar
+        working-directory: .llar-source
+        run: |
+          go install -ldflags="-checklinkname=0" ./cmd/llar
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Install prebuilt sysroot
+        shell: bash
+        run: |
+          install_artifact() {
+            module="$1"
+            version="$2"
+            matrix="$3"
+            archive="$4"
+            workspace="$5"
+            escaped=$(python3 -c 'import sys; p = sys.argv[1].replace("!", "!!"); print("".join("!" + c.lower() if c.isupper() else c for c in p))' "$module")
+            install_dir="$workspace/$escaped@$version-$matrix"
+            metadata=$(tar -xzOf "$archive" .llar/metadata.json | jq -r .metadata)
+            metadata=${metadata//'{{.InstallDir}}'/$install_dir}
+            rm -rf "$install_dir"
+            mkdir -p "$install_dir"
+            tar -xzf "$archive" -C "$install_dir" --exclude='.llar/metadata.json'
+            mkdir -p "$workspace/$escaped"
+            jq -n --arg m "$metadata" --arg key "$version-$matrix" \
+              '{cache:{($key):{metadata:$m}}}' > "$workspace/$escaped/.cache.json"
+          }
+
+          archive="$RUNNER_TEMP/sysroot.tar.gz"
+          url="$PREBUILT_SYSROOT_URL/${{ matrix.sysroot_module }}/${{ matrix.sysroot_version }}/${{ matrix.sysroot_matrix }}.tar.gz"
+          curl --fail --location --retry 3 --output "$archive" "$url"
+          install_artifact \
+            "${{ matrix.sysroot_module }}" \
+            "${{ matrix.sysroot_version }}" \
+            "${{ matrix.sysroot_matrix }}" \
+            "$archive" \
+            "$HOME/.cache/.llar/workspaces"
+
+      - name: Prebuild changed modules
+        shell: bash
+        run: |
+          while IFS= read -r module; do
+            [ -n "$module" ] || continue
+            safe="${module//\//-}"
+            mkdir -p "$RUNNER_TEMP/prebuilt/$safe"
+            llar make --verbose "./$module" \
+              --os "${{ matrix.goos }}" \
+              --arch "${{ matrix.goarch }}" \
+              --json \
+              > "$RUNNER_TEMP/prebuilt/$safe/${{ matrix.target }}.json"
+            output_dir=$(jq -r .dir "$RUNNER_TEMP/prebuilt/$safe/${{ matrix.target }}.json")
+            mkdir -p "$RUNNER_TEMP/prebuilt/$safe/${{ matrix.target }}"
+            cp -R "$output_dir/." "$RUNNER_TEMP/prebuilt/$safe/${{ matrix.target }}/"
+          done < <(jq -r '.[]' <<< '${{ needs.changes.outputs.modules }}')
+
+      - name: Upload prebuilt artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: prebuilt-${{ matrix.target }}
+          path: ${{ runner.temp }}/prebuilt
+          if-no-files-found: error
+
+  verify:
+    name: ${{ matrix.module }} (${{ matrix.platform }})
+    needs: [changes, prebuild]
+    if: needs.changes.outputs.has_modules == 'true'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJSON(needs.changes.outputs.modules) }}
+        platform:
+          - arm64-linux
+          - amd64-darwin
+          - arm64-darwin
+        include:
+          - platform: arm64-linux
+            runner: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+          - platform: amd64-darwin
+            runner: macos-15-intel
+            goos: darwin
+            goarch: amd64
+          - platform: arm64-darwin
+            runner: macos-latest
+            goos: darwin
+            goarch: arm64
+
+    steps:
+      - name: Check out formulas
+        uses: actions/checkout@v7
+
+      - name: Check out llar
+        uses: actions/checkout@v7
+        with:
+          repository: goplus/llar
+          ref: main
+          path: .llar-source
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y autoconf automake build-essential ca-certificates cmake curl gperf groff patch
+
+      - name: Install LLVM 19 on Linux
+        if: runner.os == 'Linux'
+        run: |
+          curl --fail --silent --show-error --location \
+            https://apt.llvm.org/llvm-snapshot.gpg.key \
+            --output "$RUNNER_TEMP/apt.llvm.org.asc"
+          sudo install -m 644 "$RUNNER_TEMP/apt.llvm.org.asc" /usr/share/keyrings/apt.llvm.org.asc
+          echo "deb [signed-by=/usr/share/keyrings/apt.llvm.org.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-19 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm19.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-19 lld-19 llvm-19
+          echo "/usr/lib/llvm-19/bin" >> "$GITHUB_PATH"
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install autoconf automake gperf groff llvm@19 lld@19
+          echo "$(brew --prefix llvm@19)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix lld@19)/bin" >> "$GITHUB_PATH"
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: .llar-source/go.mod
+          cache: false
+
+      - name: Verify runner platform
+        shell: bash
+        run: |
+          test "$(go env GOOS)" = "${{ matrix.goos }}"
+          test "$(go env GOARCH)" = "${{ matrix.goarch }}"
+
+      - name: Install llar
+        working-directory: .llar-source
+        run: |
+          go install -ldflags="-checklinkname=0" ./cmd/llar
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Test module
+        shell: bash
+        run: |
+          llar test --verbose "./${{ matrix.module }}" \
+            --os "${{ matrix.goos }}" \
+            --arch "${{ matrix.goarch }}"
+
+      - name: Clean local build cache
+        shell: bash
+        run: |
+          rm -rf "$HOME/.cache/.llar/workspaces"
+          rm -rf "$HOME/Library/Caches/.llar/workspaces"
+
+      - name: Download prebuilt artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: prebuilt-${{ matrix.platform }}
+          path: ${{ runner.temp }}/prebuilt
+
+      - name: Run onTest against prebuilt artifact
+        shell: bash
+        run: |
+          install_artifact() {
+            module="$1"
+            version="$2"
+            matrix="$3"
+            source_dir="$4"
+            prebuild_dir="$5"
+            raw_metadata="$6"
+            workspace="$7"
+            escaped=$(python3 -c 'import sys; p = sys.argv[1].replace("!", "!!"); print("".join("!" + c.lower() if c.isupper() else c for c in p))' "$module")
+            install_dir="$workspace/$escaped@$version-$matrix"
+            metadata=${raw_metadata//"$prebuild_dir"/"$install_dir"}
+            rm -rf "$install_dir"
+            mkdir -p "$install_dir"
+            cp -R "$source_dir/." "$install_dir/"
+            mkdir -p "$workspace/$escaped"
+            jq -n --arg m "$metadata" --arg key "$version-$matrix" \
+              '{cache:{($key):{metadata:$m}}}' > "$workspace/$escaped/.cache.json"
+          }
+
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            workspace="$HOME/Library/Caches/.llar/workspaces"
+          else
+            workspace="$HOME/.cache/.llar/workspaces"
+          fi
+
+          module='${{ matrix.module }}'
+          target='${{ matrix.platform }}'
+          safe="${module//\//-}"
+          manifest="$RUNNER_TEMP/prebuilt/$safe/$target.json"
+          version=$(jq -r .version "$manifest")
+          prebuild_dir=$(jq -r .dir "$manifest")
+          raw_metadata=$(jq -r .metadata "$manifest")
+
+          install_artifact "$module" "$version" "$target" \
+            "$RUNNER_TEMP/prebuilt/$safe/$target" \
+            "$prebuild_dir" \
+            "$raw_metadata" \
+            "$workspace"
+
+          llar test --verbose "./$module@$version" \
+            --os "${{ matrix.goos }}" \
+            --arch "${{ matrix.goarch }}"
