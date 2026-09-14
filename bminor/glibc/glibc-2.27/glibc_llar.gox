@@ -9,4 +9,5 @@ filter => {
 
 // Source builds are deferred; a prebuilt Bootlin sysroot will be supplied separately.
 onBuild ctx => {
+    panic("glibc source builds are not supported; a prebuilt sysroot artifact is required")
 }
