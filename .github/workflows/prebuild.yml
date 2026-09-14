@@ -13,10 +13,6 @@ concurrency:
   group: prebuild-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-env:
-  # Prebuilt sysroot artifacts used by Linux amd64 cross builds.
-  PREBUILT_SYSROOT_URL: http://llarpackages.xgo.dev
-
 jobs:
   changes:
     name: Find changed modules
@@ -69,21 +65,12 @@ jobs:
           - target: amd64-darwin
             goos: darwin
             goarch: amd64
-            sysroot_module: joseluisq/macosx-sdks
-            sysroot_version: "14.5"
-            sysroot_matrix: amd64-darwin
           - target: arm64-darwin
             goos: darwin
             goarch: arm64
-            sysroot_module: joseluisq/macosx-sdks
-            sysroot_version: "14.5"
-            sysroot_matrix: arm64-darwin
           - target: arm64-linux
             goos: linux
             goarch: arm64
-            sysroot_module: bminor/glibc
-            sysroot_version: glibc-2.27
-            sysroot_matrix: arm64-linux
 
     steps:
       - name: Check out formulas
@@ -133,60 +120,21 @@ jobs:
           go install -ldflags="-checklinkname=0" ./cmd/llar
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
-      - name: Install prebuilt sysroot
-        shell: bash
-        run: |
-          install_artifact() {
-            module="$1"
-            version="$2"
-            matrix="$3"
-            archive="$4"
-            workspace="$5"
-            escaped=$(python3 -c 'import sys; p = sys.argv[1].replace("!", "!!"); print("".join("!" + c.lower() if c.isupper() else c for c in p))' "$module")
-            install_dir="$workspace/$escaped@$version-$matrix"
-            metadata=$(tar -xzOf "$archive" .llar/metadata.json | jq -r .metadata)
-            metadata=${metadata//'{{.InstallDir}}'/$install_dir}
-            rm -rf "$install_dir"
-            mkdir -p "$install_dir"
-            tar -xzf "$archive" -C "$install_dir" --exclude='.llar/metadata.json'
-            mkdir -p "$workspace/$escaped"
-            jq -n --arg m "$metadata" --arg key "$version-$matrix" \
-              '{cache:{($key):{metadata:$m}}}' > "$workspace/$escaped/.cache.json"
-          }
-
-          archive="$RUNNER_TEMP/sysroot.tar.gz"
-          url="$PREBUILT_SYSROOT_URL/${{ matrix.sysroot_module }}/${{ matrix.sysroot_version }}/${{ matrix.sysroot_matrix }}.tar.gz"
-          curl --fail --location --retry 3 --output "$archive" "$url"
-          install_artifact \
-            "${{ matrix.sysroot_module }}" \
-            "${{ matrix.sysroot_version }}" \
-            "${{ matrix.sysroot_matrix }}" \
-            "$archive" \
-            "$HOME/.cache/.llar/workspaces"
-
       - name: Prebuild changed modules
         shell: bash
+        env:
+          LLARD_KODO_ACCESS_KEY: ${{ secrets.QINIU_ACCESS_KEY }}
+          LLARD_KODO_SECRET_KEY: ${{ secrets.QINIU_SECRET_KEY }}
+          LLARD_KODO_BUCKET: ${{ secrets.QINIU_BUCKET }}
+          LLARD_KODO_PUBLIC_DOMAIN: ${{ secrets.QINIU_PUBLIC_DOMAIN }}
+          LLARD_KODO_PREFIX: ${{ secrets.QINIU_PREFIX }}
         run: |
           while IFS= read -r module; do
             [ -n "$module" ] || continue
-            safe="${module//\//-}"
-            mkdir -p "$RUNNER_TEMP/prebuilt/$safe"
             llar make --verbose "./$module" \
               --os "${{ matrix.goos }}" \
-              --arch "${{ matrix.goarch }}" \
-              --json \
-              > "$RUNNER_TEMP/prebuilt/$safe/${{ matrix.target }}.json"
-            output_dir=$(jq -r .dir "$RUNNER_TEMP/prebuilt/$safe/${{ matrix.target }}.json")
-            mkdir -p "$RUNNER_TEMP/prebuilt/$safe/${{ matrix.target }}"
-            cp -R "$output_dir/." "$RUNNER_TEMP/prebuilt/$safe/${{ matrix.target }}/"
+              --arch "${{ matrix.goarch }}"
           done < <(jq -r '.[]' <<< '${{ needs.changes.outputs.modules }}')
-
-      - name: Upload prebuilt artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: prebuilt-${{ matrix.target }}
-          path: ${{ runner.temp }}/prebuilt
-          if-no-files-found: error
 
   verify:
     name: ${{ matrix.module }} (${{ matrix.platform }})
@@ -283,54 +231,15 @@ jobs:
           rm -rf "$HOME/.cache/.llar/workspaces"
           rm -rf "$HOME/Library/Caches/.llar/workspaces"
 
-      - name: Download prebuilt artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: prebuilt-${{ matrix.platform }}
-          path: ${{ runner.temp }}/prebuilt
-
       - name: Run onTest against prebuilt artifact
         shell: bash
+        env:
+          LLARD_KODO_ACCESS_KEY: ${{ secrets.QINIU_ACCESS_KEY }}
+          LLARD_KODO_SECRET_KEY: ${{ secrets.QINIU_SECRET_KEY }}
+          LLARD_KODO_BUCKET: ${{ secrets.QINIU_BUCKET }}
+          LLARD_KODO_PUBLIC_DOMAIN: ${{ secrets.QINIU_PUBLIC_DOMAIN }}
+          LLARD_KODO_PREFIX: ${{ secrets.QINIU_PREFIX }}
         run: |
-          install_artifact() {
-            module="$1"
-            version="$2"
-            matrix="$3"
-            source_dir="$4"
-            prebuild_dir="$5"
-            raw_metadata="$6"
-            workspace="$7"
-            escaped=$(python3 -c 'import sys; p = sys.argv[1].replace("!", "!!"); print("".join("!" + c.lower() if c.isupper() else c for c in p))' "$module")
-            install_dir="$workspace/$escaped@$version-$matrix"
-            metadata=${raw_metadata//"$prebuild_dir"/"$install_dir"}
-            rm -rf "$install_dir"
-            mkdir -p "$install_dir"
-            cp -R "$source_dir/." "$install_dir/"
-            mkdir -p "$workspace/$escaped"
-            jq -n --arg m "$metadata" --arg key "$version-$matrix" \
-              '{cache:{($key):{metadata:$m}}}' > "$workspace/$escaped/.cache.json"
-          }
-
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            workspace="$HOME/Library/Caches/.llar/workspaces"
-          else
-            workspace="$HOME/.cache/.llar/workspaces"
-          fi
-
-          module='${{ matrix.module }}'
-          target='${{ matrix.platform }}'
-          safe="${module//\//-}"
-          manifest="$RUNNER_TEMP/prebuilt/$safe/$target.json"
-          version=$(jq -r .version "$manifest")
-          prebuild_dir=$(jq -r .dir "$manifest")
-          raw_metadata=$(jq -r .metadata "$manifest")
-
-          install_artifact "$module" "$version" "$target" \
-            "$RUNNER_TEMP/prebuilt/$safe/$target" \
-            "$prebuild_dir" \
-            "$raw_metadata" \
-            "$workspace"
-
-          llar test --verbose "./$module@$version" \
+          llar test --verbose "./${{ matrix.module }}" \
             --os "${{ matrix.goos }}" \
             --arch "${{ matrix.goarch }}"
