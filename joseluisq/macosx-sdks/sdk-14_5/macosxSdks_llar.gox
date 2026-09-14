@@ -4,4 +4,5 @@ fromVer "14.5"
 
 // Obtain and use the SDK only as permitted by Apple's license terms.
 onBuild ctx => {
+    panic("macOS SDK source builds are not supported; a prebuilt SDK artifact is required")
 }
