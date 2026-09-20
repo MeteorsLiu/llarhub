@@ -1,0 +1,1 @@
+Select madler/zlib for the cross-build workflow smoke test.
