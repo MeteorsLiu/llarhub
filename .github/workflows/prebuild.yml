@@ -108,10 +108,22 @@ jobs:
         run: |
           while IFS= read -r module; do
             [ -n "$module" ] || continue
-            llar install --verbose "$module" \
+            output_dir="$RUNNER_TEMP/prebuilt/$module"
+            mkdir -p "$output_dir"
+            llar make --verbose "./$module" \
               --os "${{ matrix.goos }}" \
-              --arch "${{ matrix.goarch }}"
+              --arch "${{ matrix.goarch }}" \
+              --output "$output_dir/${{ matrix.target }}.tar.gz" \
+              --json \
+              > "$output_dir/${{ matrix.target }}.json"
           done < <(jq -r '.[]' <<< '${{ needs.changes.outputs.modules }}')
+
+      - name: Upload prebuilt artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: prebuilt-${{ matrix.target }}
+          path: ${{ runner.temp }}/prebuilt
+          if-no-files-found: error
 
   verify:
     name: ${{ matrix.module }} (${{ matrix.platform }})
@@ -202,18 +214,59 @@ jobs:
             --os "${{ matrix.goos }}" \
             --arch "${{ matrix.goarch }}"
 
-      - name: Clean local build cache
-        shell: bash
-        run: |
-          rm -rf "$HOME/.cache/.llar/workspaces"
-          rm -rf "$HOME/Library/Caches/.llar/workspaces"
-
       - name: Download prebuilt artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: prebuilt-${{ matrix.platform }}
+          path: ${{ runner.temp }}/prebuilt
+
+      - name: Install prebuilt artifact in workspace
         shell: bash
         run: |
-          llar install --verbose "${{ matrix.module }}" \
+          module='${{ matrix.module }}'
+          target='${{ matrix.platform }}'
+          prebuilt_dir="$RUNNER_TEMP/prebuilt/$module"
+          prebuilt_manifest="$prebuilt_dir/$target.json"
+          archive="$prebuilt_dir/$target.tar.gz"
+          native_manifest="$RUNNER_TEMP/native-$target.json"
+
+          llar make --json "./$module" \
             --os "${{ matrix.goos }}" \
-            --arch "${{ matrix.goarch }}"
+            --arch "${{ matrix.goarch }}" \
+            > "$native_manifest"
+
+          version=$(jq -er .version "$prebuilt_manifest")
+          native_version=$(jq -er .version "$native_manifest")
+          if [ "$native_version" != "$version" ]; then
+            echo "native version $native_version does not match prebuilt version $version" >&2
+            exit 1
+          fi
+
+          native_dir=$(jq -er .dir "$native_manifest")
+          suffix="@$version-$target"
+          if [[ "$native_dir" != *"$suffix" ]]; then
+            echo "native output $native_dir does not end with $suffix" >&2
+            exit 1
+          fi
+          cache_dir=${native_dir%"$suffix"}
+          cache_file="$cache_dir/.cache.json"
+          cache_key="$version-$target"
+
+          metadata_json=$(tar -xOzf "$archive" .llar/metadata.json)
+          metadata=$(jq -er .metadata <<< "$metadata_json")
+          metadata=${metadata//'{{.InstallDir}}'/$native_dir}
+
+          rm -rf "$native_dir"
+          mkdir -p "$native_dir"
+          tar -xzf "$archive" -C "$native_dir"
+          rm "$native_dir/.llar/metadata.json"
+
+          jq -e --arg key "$cache_key" '.cache[$key] != null' "$cache_file" >/dev/null
+          updated_cache="$RUNNER_TEMP/cache-$target.json"
+          jq --arg key "$cache_key" --arg metadata "$metadata" \
+            '.cache[$key].metadata = $metadata' \
+            "$cache_file" > "$updated_cache"
+          mv "$updated_cache" "$cache_file"
 
       - name: Run onTest against prebuilt artifact
         shell: bash
