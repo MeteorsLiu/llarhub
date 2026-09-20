@@ -16,7 +16,7 @@ concurrency:
 jobs:
   changes:
     name: Find changed modules
-    runs-on: [qiniu, ubuntu-24.04]
+    runs-on: ubuntu-24.04
     outputs:
       modules: ${{ steps.modules.outputs.modules }}
       has_modules: ${{ steps.modules.outputs.has_modules }}
@@ -57,7 +57,7 @@ jobs:
     name: Prebuild ${{ matrix.target }} on linux-amd64
     needs: changes
     if: needs.changes.outputs.has_modules == 'true'
-    runs-on: [qiniu, ubuntu-24.04]
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
