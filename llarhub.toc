@@ -1,1 +1,2 @@
 ibireme/yyjson yyjson
+ebiggers/libdeflate libdeflate
