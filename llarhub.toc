@@ -1,0 +1,4 @@
+ibireme/yyjson yyjson
+ebiggers/libdeflate libdeflate
+yaml/libyaml libyaml
+madler/zlib zlib
