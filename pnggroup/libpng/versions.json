@@ -1,0 +1,11 @@
+{
+	"path": "pnggroup/libpng",
+	"deps": {
+		"v1.6.58": [
+			{
+				"path": "madler/zlib",
+				"version": "v1.3.1"
+			}
+		]
+	}
+}
